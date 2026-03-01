@@ -18,7 +18,7 @@
 ## Install
 
 ```bash
-curl -fsSL https://zerobrew.rs/install | bash
+curl -fsSL https://raw.githubusercontent.com/i-nick/zerobrew/refs/heads/main/install.sh | bash
 ```
 
 After install, run the `export` command it prints (or restart your terminal).
