@@ -255,6 +255,44 @@ impl Database {
         Ok(records)
     }
 
+    pub fn list_keg_files_for_name(&self, name: &str) -> Result<Vec<KegFileRecord>, Error> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT name, version, linked_path, target_path
+                 FROM keg_files
+                 WHERE name = ?1
+                 ORDER BY version, linked_path",
+            )
+            .map_err(Error::store("failed to prepare statement"))?;
+
+        let records = stmt
+            .query_map(params![name], |row| {
+                Ok(KegFileRecord {
+                    name: row.get(0)?,
+                    version: row.get(1)?,
+                    linked_path: row.get(2)?,
+                    target_path: row.get(3)?,
+                })
+            })
+            .map_err(Error::store("failed to query keg files"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::store("failed to collect results"))?;
+
+        Ok(records)
+    }
+
+    pub fn find_keg_file_owner(&self, linked_path: &str) -> Result<Option<String>, Error> {
+        self.conn
+            .query_row(
+                "SELECT name FROM keg_files WHERE linked_path = ?1 LIMIT 1",
+                params![linked_path],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Error::store("failed to query keg file owner"))
+    }
+
     pub fn replace_store_refs(&self, store_refs: &[StoreRef]) -> Result<(), Error> {
         let tx = self
             .conn
@@ -559,6 +597,43 @@ mod tests {
         }
 
         assert!(db.get_installed("foo").is_none());
+    }
+
+    #[test]
+    fn list_keg_files_for_name_filters_records() {
+        let mut db = Database::in_memory().unwrap();
+
+        {
+            let tx = db.transaction().unwrap();
+            tx.record_install("foo", "1.0.0", "abc123").unwrap();
+            tx.record_install("bar", "2.0.0", "def456").unwrap();
+            tx.record_linked_file("foo", "1.0.0", "/tmp/foo", "/tmp/foo")
+                .unwrap();
+            tx.record_linked_file("bar", "2.0.0", "/tmp/bar", "/tmp/bar")
+                .unwrap();
+            tx.commit().unwrap();
+        }
+
+        let records = db.list_keg_files_for_name("foo").unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "foo");
+        assert_eq!(records[0].linked_path, "/tmp/foo");
+    }
+
+    #[test]
+    fn find_keg_file_owner_returns_matching_name() {
+        let mut db = Database::in_memory().unwrap();
+
+        {
+            let tx = db.transaction().unwrap();
+            tx.record_install("cask:zed", "1.0.0", "abc123").unwrap();
+            tx.record_linked_file("cask:zed", "1.0.0", "/tmp/Zed.app", "/tmp/Zed.app")
+                .unwrap();
+            tx.commit().unwrap();
+        }
+
+        let owner = db.find_keg_file_owner("/tmp/Zed.app").unwrap();
+        assert_eq!(owner.as_deref(), Some("cask:zed"));
     }
 
     #[test]

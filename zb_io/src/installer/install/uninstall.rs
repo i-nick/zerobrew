@@ -1,3 +1,5 @@
+use std::fs;
+
 use zb_core::{Error, formula_token};
 
 use super::Installer;
@@ -8,9 +10,16 @@ impl Installer {
             name: name.to_string(),
         })?;
         let keg_name = formula_token(&installed.name);
+        let recorded_paths = self.db.list_keg_files_for_name(name)?;
 
         let keg_path = self.cellar.keg_path(keg_name, &installed.version);
         self.linker.unlink_keg(&keg_path)?;
+        for record in &recorded_paths {
+            let path = std::path::Path::new(&record.linked_path);
+            if !path.starts_with(&self.prefix) {
+                remove_recorded_path(path)?;
+            }
+        }
 
         {
             let tx = self.db.transaction()?;
@@ -35,6 +44,26 @@ impl Installer {
 
         Ok(removed)
     }
+}
+
+fn remove_recorded_path(path: &std::path::Path) -> Result<(), Error> {
+    let metadata = match path.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(Error::store("failed to read installed artifact metadata")(
+                err,
+            ));
+        }
+    };
+
+    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(path).map_err(Error::store("failed to remove installed directory"))?;
+    } else {
+        fs::remove_file(path).map_err(Error::store("failed to remove installed file"))?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

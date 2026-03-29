@@ -258,6 +258,13 @@ impl Installer {
         self.db.list_installed()
     }
 
+    pub fn is_linked(&self, name: &str) -> Result<bool, Error> {
+        let records = self.db.list_keg_files_for_name(name)?;
+        Ok(records
+            .iter()
+            .any(|record| Path::new(&record.linked_path).starts_with(&self.prefix)))
+    }
+
     pub fn keg_path(&self, name: &str, version: &str) -> PathBuf {
         self.cellar.keg_path(name, version)
     }
@@ -373,6 +380,39 @@ mod test_support {
         let mut hasher = Sha256::new();
         hasher.update(data);
         format!("{:x}", hasher.finalize())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn create_cask_dmg(app_name: &str, binary_relative_path: &str, contents: &str) -> Vec<u8> {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let payload_dir = tmp.path().join("payload");
+        let binary_path = payload_dir.join(app_name).join(binary_relative_path);
+        fs::create_dir_all(binary_path.parent().unwrap()).unwrap();
+        fs::write(&binary_path, contents).unwrap();
+        let mut permissions = fs::metadata(&binary_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&binary_path, permissions).unwrap();
+
+        let dmg_path = tmp.path().join("fixture.dmg");
+        let status = Command::new("/usr/bin/hdiutil")
+            .arg("create")
+            .arg("-quiet")
+            .arg("-fs")
+            .arg("HFS+")
+            .arg("-format")
+            .arg("UDZO")
+            .arg("-srcfolder")
+            .arg(&payload_dir)
+            .arg(&dmg_path)
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to create test DMG");
+
+        fs::read(dmg_path).unwrap()
     }
 
     pub fn get_test_bottle_tag() -> &'static str {

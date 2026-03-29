@@ -148,6 +148,12 @@ fn extract_zip_archive(path: &Path, dest_dir: &Path) -> Result<(), Error> {
                 .map_err(Error::store("failed to create output parent directory"))?;
         }
 
+        #[cfg(unix)]
+        if entry.unix_mode().is_some_and(is_symlink_mode) {
+            extract_zip_symlink(&mut entry, &raw_path, &out_path, dest_dir)?;
+            continue;
+        }
+
         let mut output =
             File::create(&out_path).map_err(Error::store("failed to create extracted file"))?;
         std::io::copy(&mut entry, &mut output)
@@ -162,6 +168,62 @@ fn extract_zip_archive(path: &Path, dest_dir: &Path) -> Result<(), Error> {
                     .map_err(Error::store("failed to set zip file permissions"))?;
             }
         }
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn is_symlink_mode(mode: u32) -> bool {
+    mode & 0o170000 == 0o120000
+}
+
+#[cfg(unix)]
+fn extract_zip_symlink<R: Read>(
+    entry: &mut zip::read::ZipFile<'_, R>,
+    raw_path: &Path,
+    out_path: &Path,
+    dest_dir: &Path,
+) -> Result<(), Error> {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let mut target_bytes = Vec::new();
+    entry
+        .read_to_end(&mut target_bytes)
+        .map_err(Error::store("failed to read zip symlink target"))?;
+    let target = PathBuf::from(OsString::from_vec(target_bytes));
+
+    validate_symlink_target(raw_path, &target, dest_dir)?;
+
+    std::os::unix::fs::symlink(&target, out_path)
+        .map_err(Error::store("failed to create extracted symlink"))?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn validate_symlink_target(raw_path: &Path, target: &Path, dest_dir: &Path) -> Result<(), Error> {
+    if target.is_absolute() {
+        return Err(Error::StoreCorruption {
+            message: format!(
+                "absolute symlink target in zip entry {} -> {}",
+                raw_path.display(),
+                target.display()
+            ),
+        });
+    }
+
+    let link_parent = raw_path.parent().unwrap_or_else(|| Path::new(""));
+    let normalized_target = normalize_path(&dest_dir.join(link_parent).join(target));
+    let normalized_dest = normalize_path(dest_dir);
+    if !normalized_target.starts_with(&normalized_dest) {
+        return Err(Error::StoreCorruption {
+            message: format!(
+                "symlink target escapes destination directory: {} -> {}",
+                raw_path.display(),
+                target.display()
+            ),
+        });
     }
 
     Ok(())
@@ -342,6 +404,28 @@ mod tests {
         zip.finish().unwrap().into_inner()
     }
 
+    #[cfg(unix)]
+    fn create_test_zip_with_symlink(files: Vec<(&str, &[u8])>, symlink: (&str, &str)) -> Vec<u8> {
+        use zip::write::SimpleFileOptions;
+
+        let cursor = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+
+        for (path, content) in files {
+            zip.start_file(path, SimpleFileOptions::default()).unwrap();
+            zip.write_all(content).unwrap();
+        }
+
+        zip.add_symlink(
+            symlink.0,
+            symlink.1,
+            SimpleFileOptions::default().unix_permissions(0o755),
+        )
+        .unwrap();
+
+        zip.finish().unwrap().into_inner()
+    }
+
     #[test]
     fn extracts_file_with_content() {
         let tmp = TempDir::new().unwrap();
@@ -422,6 +506,56 @@ mod tests {
         assert_eq!(
             fs::read_link(&link_path).unwrap(),
             PathBuf::from("target.txt")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserves_zip_symlink() {
+        let tmp = TempDir::new().unwrap();
+        let zip_data = create_test_zip_with_symlink(
+            vec![("target.txt", b"Hello, World!")],
+            ("link", "target.txt"),
+        );
+
+        let zip_path = tmp.path().join("test.zip");
+        fs::write(&zip_path, &zip_data).unwrap();
+
+        let dest = tmp.path().join("extracted");
+        fs::create_dir(&dest).unwrap();
+
+        extract_archive(&zip_path, &dest).unwrap();
+
+        let link_path = dest.join("link");
+        assert!(
+            link_path
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            fs::read_link(&link_path).unwrap(),
+            PathBuf::from("target.txt")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_zip_symlink_that_escapes_destination() {
+        let tmp = TempDir::new().unwrap();
+        let zip_data = create_test_zip_with_symlink(vec![], ("link", "../outside"));
+
+        let zip_path = tmp.path().join("test.zip");
+        fs::write(&zip_path, &zip_data).unwrap();
+
+        let dest = tmp.path().join("extracted");
+        fs::create_dir(&dest).unwrap();
+
+        let err = extract_archive(&zip_path, &dest).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("symlink target escapes destination directory")
         );
     }
 

@@ -1163,6 +1163,52 @@ end
     }
 
     #[tokio::test]
+    async fn get_cask_ignores_stale_cached_metadata() {
+        let mock_server = MockServer::start().await;
+        let stale_json = r#"{
+  "token": "iterm2",
+  "version": "3.4.0",
+  "url": "https://example.com/iterm2-old.zip",
+  "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "artifacts": [{"app":["iTerm.app"]}]
+}"#;
+        let fresh_json = r#"{
+  "token": "iterm2",
+  "version": "3.5.0",
+  "url": "https://example.com/iterm2.zip",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "artifacts": [{"app":["iTerm.app"]}]
+}"#;
+
+        let cache = ApiCache::in_memory().unwrap();
+        cache
+            .put(
+                &format!("{}/iterm2.json", mock_server.uri()),
+                &CacheEntry {
+                    etag: Some("stale".to_string()),
+                    last_modified: None,
+                    body: stale_json.to_string(),
+                },
+            )
+            .unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/iterm2.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(fresh_json))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = ApiClient::with_base_url(mock_server.uri())
+            .unwrap()
+            .with_cask_base_url(mock_server.uri())
+            .with_cache(cache);
+        let cask = client.get_cask("iterm2").await.unwrap();
+        assert_eq!(cask["version"], "3.5.0");
+        assert_eq!(cask["url"], "https://example.com/iterm2.zip");
+    }
+
+    #[tokio::test]
     async fn get_all_formulas_raw_returns_bulk_json() {
         let mock_server = MockServer::start().await;
         let fixture = include_str!("../../../zb_core/fixtures/formula_foo.json");

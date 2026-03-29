@@ -1,8 +1,17 @@
+#[cfg(target_os = "macos")]
+use std::process::Command;
+
 use serde_json::Value;
 use zb_core::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaskBinary {
+    pub source: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaskApp {
     pub source: String,
     pub target: String,
 }
@@ -15,14 +24,20 @@ pub struct ResolvedCask {
     pub url: String,
     pub sha256: String,
     pub binaries: Vec<CaskBinary>,
+    pub apps: Vec<CaskApp>,
+    pub has_pkg: bool,
+    pub has_preflight: bool,
 }
 
 pub fn resolve_cask(token: &str, cask: &Value) -> Result<ResolvedCask, Error> {
     let mut url = required_string(cask, "url")?;
     let mut sha256 = required_string(cask, "sha256")?;
-    let version = required_string(cask, "version")?;
+    let mut version = required_string(cask, "version")?;
 
     if let Some(variation) = select_platform_variation(cask) {
+        if let Some(variation_version) = variation.get("version").and_then(Value::as_str) {
+            version = variation_version.to_string();
+        }
         if let Some(variation_url) = variation.get("url").and_then(Value::as_str) {
             url = variation_url.to_string();
         }
@@ -38,6 +53,10 @@ pub fn resolve_cask(token: &str, cask: &Value) -> Result<ResolvedCask, Error> {
     }
 
     let binaries = parse_binary_artifacts(cask)?;
+    let apps = parse_app_artifacts(cask)?;
+    let has_pkg = has_artifact_type(cask, "pkg");
+    let has_preflight = has_artifact_type(cask, "preflight");
+
     if binaries.is_empty() {
         let found = artifact_types(cask);
         return Err(Error::InvalidArgument {
@@ -48,6 +67,21 @@ pub fn resolve_cask(token: &str, cask: &Value) -> Result<ResolvedCask, Error> {
         });
     }
 
+    if binaries
+        .iter()
+        .any(|binary| binary.source.starts_with("$APPDIR"))
+        && apps.is_empty()
+    {
+        let detail = if has_pkg {
+            "uses pkg-installed APPDIR binaries, which are not supported yet"
+        } else {
+            "uses APPDIR binary artifacts but has no installable 'app' artifacts"
+        };
+        return Err(Error::InvalidArgument {
+            message: format!("cask '{token}' {detail}"),
+        });
+    }
+
     Ok(ResolvedCask {
         install_name: format!("cask:{token}"),
         token: token.to_string(),
@@ -55,6 +89,9 @@ pub fn resolve_cask(token: &str, cask: &Value) -> Result<ResolvedCask, Error> {
         url,
         sha256,
         binaries,
+        apps,
+        has_pkg,
+        has_preflight,
     })
 }
 
@@ -68,42 +105,83 @@ fn required_string(value: &Value, field: &str) -> Result<String, Error> {
         })
 }
 
-fn select_platform_variation(cask: &Value) -> Option<&Value> {
-    let variations = cask.get("variations")?;
-    preferred_variation_keys()
-        .iter()
-        .find_map(|key| variations.get(key))
+fn select_platform_variation<'a>(cask: &'a Value) -> Option<&'a Value> {
+    let key = current_platform_variation_key()?;
+    select_platform_variation_for_key(cask, key)
 }
 
-fn preferred_variation_keys() -> &'static [&'static str] {
+fn select_platform_variation_for_key<'a>(cask: &'a Value, key: &str) -> Option<&'a Value> {
+    cask.get("variations")?
+        .get(key)
+        .filter(|value| !value.is_null())
+}
+
+fn current_platform_variation_key() -> Option<&'static str> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        &["x86_64_linux", "arm64_linux"]
+        return Some("x86_64_linux");
     }
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     {
-        &["arm64_linux", "x86_64_linux"]
+        return Some("arm64_linux");
     }
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
-        &[
-            "arm64_tahoe",
-            "arm64_sequoia",
-            "arm64_sonoma",
-            "arm64_ventura",
-            "arm64_monterey",
-            "arm64_big_sur",
-        ]
+        return current_macos_major_version().and_then(arm64_macos_variation_key_for_major);
     }
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
     {
-        &[
-            "tahoe", "sequoia", "sonoma", "ventura", "monterey", "big_sur", "catalina",
-        ]
+        return current_macos_major_version().and_then(intel_macos_variation_key_for_major);
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
-        &[]
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn current_macos_major_version() -> Option<u32> {
+    let output = Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    std::str::from_utf8(&output.stdout)
+        .ok()?
+        .trim()
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn arm64_macos_variation_key_for_major(major: u32) -> Option<&'static str> {
+    match major {
+        26 => Some("arm64_tahoe"),
+        15 => Some("arm64_sequoia"),
+        14 => Some("arm64_sonoma"),
+        13 => Some("arm64_ventura"),
+        12 => Some("arm64_monterey"),
+        11 => Some("arm64_big_sur"),
+        _ => None,
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+fn intel_macos_variation_key_for_major(major: u32) -> Option<&'static str> {
+    match major {
+        26 => Some("tahoe"),
+        15 => Some("sequoia"),
+        14 => Some("sonoma"),
+        13 => Some("ventura"),
+        12 => Some("monterey"),
+        11 => Some("big_sur"),
+        10 => Some("catalina"),
+        _ => None,
     }
 }
 
@@ -125,8 +203,35 @@ fn artifact_types(cask: &Value) -> String {
     }
 }
 
+fn has_artifact_type(cask: &Value, artifact_type: &str) -> bool {
+    cask.get("artifacts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .any(|artifact| artifact.contains_key(artifact_type))
+}
+
 fn parse_binary_artifacts(cask: &Value) -> Result<Vec<CaskBinary>, Error> {
-    let mut binaries = Vec::new();
+    parse_artifact_entries(cask, "binary", |entry| {
+        let (source, target) = parse_binary_entry(entry)?;
+        Ok(CaskBinary { source, target })
+    })
+}
+
+fn parse_app_artifacts(cask: &Value) -> Result<Vec<CaskApp>, Error> {
+    parse_artifact_entries(cask, "app", |entry| {
+        let (source, target) = parse_app_entry(entry)?;
+        Ok(CaskApp { source, target })
+    })
+}
+
+fn parse_artifact_entries<T>(
+    cask: &Value,
+    artifact_type: &str,
+    mut parse_entry: impl FnMut(&Value) -> Result<T, Error>,
+) -> Result<Vec<T>, Error> {
+    let mut parsed = Vec::new();
     let artifacts = cask
         .get("artifacts")
         .and_then(Value::as_array)
@@ -135,17 +240,33 @@ fn parse_binary_artifacts(cask: &Value) -> Result<Vec<CaskBinary>, Error> {
         })?;
 
     for artifact in artifacts {
-        let Some(entries) = artifact.get("binary").and_then(Value::as_array) else {
+        let Some(raw) = artifact.get(artifact_type) else {
             continue;
         };
 
-        for entry in entries {
-            let (source, target) = parse_binary_entry(entry)?;
-            binaries.push(CaskBinary { source, target });
+        match raw {
+            Value::String(_) => parsed.push(parse_entry(raw)?),
+            Value::Array(entries) if is_direct_artifact_pair(entries) => {
+                parsed.push(parse_entry(raw)?);
+            }
+            Value::Array(entries) => {
+                for entry in entries {
+                    parsed.push(parse_entry(entry)?);
+                }
+            }
+            _ => {
+                return Err(Error::InvalidArgument {
+                    message: format!("unsupported cask {artifact_type} artifact shape"),
+                });
+            }
         }
     }
 
-    Ok(binaries)
+    Ok(parsed)
+}
+
+fn is_direct_artifact_pair(entries: &[Value]) -> bool {
+    entries.len() == 2 && entries[0].is_string() && entries[1].is_object()
 }
 
 fn parse_binary_entry(entry: &Value) -> Result<(String, String), Error> {
@@ -171,13 +292,46 @@ fn parse_binary_entry(entry: &Value) -> Result<(String, String), Error> {
         .map(ToString::to_string)
         .unwrap_or_else(|| basename(source).unwrap_or_else(|_| source.to_string()));
 
-    if target.contains('/') || target.contains('$') || target.contains('~') {
-        return Err(Error::InvalidArgument {
-            message: format!("unsupported cask binary target path '{target}'"),
-        });
-    }
+    validate_simple_target(&target, "binary")?;
 
     Ok((source.to_string(), target))
+}
+
+fn parse_app_entry(entry: &Value) -> Result<(String, String), Error> {
+    if let Some(path) = entry.as_str() {
+        return Ok((path.to_string(), basename(path)?));
+    }
+
+    let array = entry.as_array().ok_or_else(|| Error::InvalidArgument {
+        message: "unsupported cask app artifact shape".to_string(),
+    })?;
+    let source = array
+        .first()
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::InvalidArgument {
+            message: "unsupported cask app source".to_string(),
+        })?;
+
+    let target = array
+        .get(1)
+        .and_then(Value::as_object)
+        .and_then(|obj| obj.get("target"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or_else(|| basename(source).unwrap_or_else(|_| source.to_string()));
+
+    validate_simple_target(&target, "app")?;
+
+    Ok((source.to_string(), target))
+}
+
+fn validate_simple_target(target: &str, artifact_type: &str) -> Result<(), Error> {
+    if target.contains('/') || target.contains('$') || target.contains('~') {
+        return Err(Error::InvalidArgument {
+            message: format!("unsupported cask {artifact_type} target path '{target}'"),
+        });
+    }
+    Ok(())
 }
 
 fn basename(path: &str) -> Result<String, Error> {
@@ -204,6 +358,7 @@ mod tests {
             "artifacts": [{ "binary": [["op"]] }],
             "variations": {
                 "x86_64_linux": {
+                    "version": "0.9.0",
                     "url": "https://example.com/linux.zip",
                     "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                 }
@@ -213,12 +368,66 @@ mod tests {
         let _resolved = resolve_cask("test", &cask).unwrap();
         #[cfg(target_os = "linux")]
         {
+            assert_eq!(_resolved.version, "0.9.0");
             assert_eq!(_resolved.url, "https://example.com/linux.zip");
             assert_eq!(
                 _resolved.sha256,
                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             );
         }
+    }
+
+    #[test]
+    fn select_platform_variation_for_key_uses_exact_match_only() {
+        let cask = serde_json::json!({
+            "variations": {
+                "arm64_big_sur": {
+                    "version": "1.106.3",
+                    "url": "https://example.com/big-sur.zip",
+                    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                }
+            }
+        });
+
+        assert!(select_platform_variation_for_key(&cask, "arm64_tahoe").is_none());
+        let selected = select_platform_variation_for_key(&cask, "arm64_big_sur").unwrap();
+        assert_eq!(
+            selected.get("version").and_then(Value::as_str),
+            Some("1.106.3")
+        );
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn resolve_cask_keeps_top_level_artifact_when_only_older_macos_variation_exists() {
+        let cask = serde_json::json!({
+            "token": "visual-studio-code",
+            "version": "1.113.0",
+            "url": "https://update.code.visualstudio.com/1.113.0/darwin-arm64/stable",
+            "sha256": "9bdc19fbb7b2b936c692bf938c252b48649caf52f479ab4a0bb3748c969c8f36",
+            "artifacts": [
+                { "app": ["Visual Studio Code.app"] },
+                { "binary": ["$APPDIR/Visual Studio Code.app/Contents/Resources/app/bin/code", {"target": "code"}] }
+            ],
+            "variations": {
+                "arm64_big_sur": {
+                    "version": "1.106.3",
+                    "url": "https://update.code.visualstudio.com/1.106.3/darwin-arm64/stable",
+                    "sha256": "35dd438808dde1dd1f65490ffe7713ed64102324c0809efbec0b4eb2809b218b"
+                }
+            }
+        });
+
+        let resolved = resolve_cask("visual-studio-code", &cask).unwrap();
+        assert_eq!(resolved.version, "1.113.0");
+        assert_eq!(
+            resolved.url,
+            "https://update.code.visualstudio.com/1.113.0/darwin-arm64/stable"
+        );
+        assert_eq!(
+            resolved.sha256,
+            "9bdc19fbb7b2b936c692bf938c252b48649caf52f479ab4a0bb3748c969c8f36"
+        );
     }
 
     #[test]
@@ -240,6 +449,49 @@ mod tests {
         assert_eq!(resolved.binaries.len(), 2);
         assert_eq!(resolved.binaries[0].target, "tool");
         assert_eq!(resolved.binaries[1].target, "tool-two");
+    }
+
+    #[test]
+    fn resolve_cask_parses_direct_binary_pair_shape() {
+        let cask = serde_json::json!({
+            "token": "zed",
+            "version": "1.0.0",
+            "url": "https://example.com/Zed.dmg",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifacts": [
+                { "app": ["Zed.app"] },
+                { "binary": ["$APPDIR/Zed.app/Contents/MacOS/cli", {"target": "zed"}] }
+            ]
+        });
+
+        let resolved = resolve_cask("zed", &cask).unwrap();
+        assert_eq!(resolved.apps.len(), 1);
+        assert_eq!(resolved.apps[0].target, "Zed.app");
+        assert_eq!(resolved.binaries.len(), 1);
+        assert_eq!(
+            resolved.binaries[0].source,
+            "$APPDIR/Zed.app/Contents/MacOS/cli"
+        );
+        assert_eq!(resolved.binaries[0].target, "zed");
+    }
+
+    #[test]
+    fn resolve_cask_parses_app_targets() {
+        let cask = serde_json::json!({
+            "token": "thorium",
+            "version": "1.0.0",
+            "url": "https://example.com/test.zip",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifacts": [
+                { "app": ["Thorium.app", {"target": "Thorium Browser.app"}] },
+                { "binary": ["thorium"] }
+            ]
+        });
+
+        let resolved = resolve_cask("thorium", &cask).unwrap();
+        assert_eq!(resolved.apps.len(), 1);
+        assert_eq!(resolved.apps[0].source, "Thorium.app");
+        assert_eq!(resolved.apps[0].target, "Thorium Browser.app");
     }
 
     #[test]
@@ -286,5 +538,58 @@ mod tests {
         assert!(msg.contains("no binary artifacts"), "got: {msg}");
         assert!(msg.contains("app"), "got: {msg}");
         assert!(msg.contains("zap"), "got: {msg}");
+    }
+
+    #[test]
+    fn resolve_cask_rejects_pathlike_binary_targets() {
+        let cask = serde_json::json!({
+            "token": "bad",
+            "version": "1.0.0",
+            "url": "https://example.com/test.zip",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifacts": [
+                { "binary": [["bin/tool", {"target": "$APPDIR/tool"}]] }
+            ]
+        });
+
+        let err = resolve_cask("bad", &cask).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unsupported cask binary target path")
+        );
+    }
+
+    #[test]
+    fn resolve_cask_rejects_pathlike_app_targets() {
+        let cask = serde_json::json!({
+            "token": "bad-app",
+            "version": "1.0.0",
+            "url": "https://example.com/test.zip",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifacts": [
+                { "app": ["Foo.app", {"target": "~/Applications/Foo.app"}] },
+                { "binary": ["foo"] }
+            ]
+        });
+
+        let err = resolve_cask("bad-app", &cask).unwrap_err();
+        assert!(err.to_string().contains("unsupported cask app target path"));
+    }
+
+    #[test]
+    fn resolve_cask_reports_pkg_backed_appdir_casks_as_unsupported() {
+        let cask = serde_json::json!({
+            "token": "pkg-app",
+            "version": "1.0.0",
+            "url": "https://example.com/test.pkg",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifacts": [
+                { "pkg": ["test.pkg"] },
+                { "binary": ["$APPDIR/Test.app/Contents/MacOS/test"] }
+            ]
+        });
+
+        let err = resolve_cask("pkg-app", &cask).unwrap_err();
+        assert!(err.to_string().contains("pkg-installed APPDIR binaries"));
     }
 }

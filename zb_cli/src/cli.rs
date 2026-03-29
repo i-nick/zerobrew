@@ -91,6 +91,24 @@ mod tests {
         let result = Cli::try_parse_from(["zb", "outdated", "--verbose", "--json"]);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn uninstall_accepts_remove_alias() {
+        let cli = Cli::try_parse_from(["zb", "remove", "jq"]).unwrap();
+        assert!(matches!(cli.command, super::Commands::Uninstall { .. }));
+    }
+
+    #[test]
+    fn upgrade_accepts_no_args() {
+        let cli = Cli::try_parse_from(["zb", "upgrade"]).unwrap();
+        assert!(matches!(cli.command, super::Commands::Upgrade { .. }));
+    }
+
+    #[test]
+    fn upgrade_casks_conflicts_with_explicit_packages() {
+        let result = Cli::try_parse_from(["zb", "upgrade", "--casks", "cask:zed"]);
+        assert!(result.is_err());
+    }
 }
 
 #[derive(Subcommand)]
@@ -107,6 +125,13 @@ pub enum Commands {
         #[command(subcommand)]
         command: Option<BundleCommands>,
     },
+    Upgrade {
+        #[arg(conflicts_with = "casks", num_args = 0..)]
+        formulas: Vec<String>,
+        #[arg(long)]
+        casks: bool,
+    },
+    #[command(visible_alias = "remove")]
     Uninstall {
         #[arg(required_unless_present = "all", num_args = 1..)]
         formulas: Vec<String>,

@@ -70,6 +70,9 @@ async fn run(cli: Cli) -> Result<(), zb_core::Error> {
         Commands::Bundle { command } => {
             commands::bundle::execute(&mut installer, command, &mut ui).await
         }
+        Commands::Upgrade { formulas, casks } => {
+            commands::upgrade::execute(&mut installer, formulas, casks, &mut ui).await
+        }
         Commands::Uninstall { formulas, all } => {
             commands::uninstall::execute(&mut installer, formulas, all, &mut ui)
         }

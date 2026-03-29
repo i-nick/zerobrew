@@ -279,9 +279,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path, try_hardlink: bool) -> Result<(), 
     Ok(())
 }
 
-// For testing - copy without fallback strategies
-#[cfg(test)]
-fn copy_dir_copy_only(src: &Path, dst: &Path) -> Result<(), Error> {
+pub(crate) fn copy_dir_copy_only(src: &Path, dst: &Path) -> Result<(), Error> {
     copy_dir_recursive(src, dst, false)
 }
 
