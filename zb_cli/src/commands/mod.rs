@@ -10,6 +10,7 @@ pub mod migrate;
 pub mod outdated;
 pub mod reset;
 pub mod run;
+pub mod search;
 pub mod uninstall;
 pub mod update;
 pub mod upgrade;

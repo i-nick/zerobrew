@@ -7,9 +7,9 @@
   <strong>中文</strong>
 </p>
 
-[![Lint](https://github.com/lucasgelfond/zerobrew/actions/workflows/ci.yml/badge.svg)](https://github.com/lucasgelfond/zerobrew/actions/workflows/ci.yml)
-[![Test](https://github.com/lucasgelfond/zerobrew/actions/workflows/test.yml/badge.svg)](https://github.com/lucasgelfond/zerobrew/actions/workflows/test.yml)
-[![Release](https://img.shields.io/github/v/release/lucasgelfond/zerobrew?display_name=tag)](https://github.com/lucasgelfond/zerobrew/releases)
+[![Lint](https://github.com/i-nick/zerobrew/actions/workflows/ci.yml/badge.svg)](https://github.com/i-nick/zerobrew/actions/workflows/ci.yml)
+[![Test](https://github.com/i-nick/zerobrew/actions/workflows/test.yml/badge.svg)](https://github.com/i-nick/zerobrew/actions/workflows/test.yml)
+[![Release](https://img.shields.io/github/v/release/i-nick/zerobrew?display_name=tag)](https://github.com/i-nick/zerobrew/releases)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/ZaPYwm9zaw)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE-MIT.md)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE-APACHE.md)
@@ -29,7 +29,7 @@ curl -fsSL https://zerobrew.rs/install | bash
 或通过 Homebrew 安装：
 
 ```bash
-brew tap lucasgelfond/zerobrew && brew install zerobrew
+brew tap i-nick/zerobrew && brew install zerobrew
 ```
 
 安装完成后，运行它打印的 `export` 命令（或重启终端）。
@@ -80,10 +80,10 @@ zerobrew 处于实验阶段。我们建议将其与 Homebrew 并行运行，而�
 ## 项目状态 (Project status)
 
 <div align="center">
-  <a href="https://star-history.com/#lucasgelfond/zerobrew&Date">
+  <a href="https://star-history.com/#i-nick/zerobrew&Date">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=lucasgelfond/zerobrew&type=Date&theme=dark" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=lucasgelfond/zerobrew&type=Date" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=i-nick/zerobrew&type=Date&theme=dark" />
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=i-nick/zerobrew&type=Date" />
     </picture>
   </a>
 </div>

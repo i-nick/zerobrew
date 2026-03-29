@@ -24,11 +24,27 @@ async fn main() {
 async fn run(cli: Cli) -> Result<(), zb_core::Error> {
     let mut ui = Ui::new();
 
-    if let Commands::Completion { shell } = cli.command {
-        return commands::completion::execute(shell);
+    if let Commands::Completion { shell } = &cli.command {
+        return commands::completion::execute(*shell);
     }
 
-    let root = get_root_path(cli.root);
+    let root = get_root_path(cli.root.clone());
+
+    if let Commands::Search { query } = &cli.command {
+        return commands::search::execute(&root, query.clone(), &mut ui).await;
+    }
+
+    if let Commands::Init { no_modify_path } = &cli.command {
+        let prefix = cli.prefix.clone().unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                root.clone()
+            } else {
+                root.join("prefix")
+            }
+        });
+        return commands::init::execute(&root, &prefix, *no_modify_path, &mut ui);
+    }
+
     let prefix = cli.prefix.unwrap_or_else(|| {
         // On macOS, Mach-O binaries have fixed-size path fields so the prefix
         // must be no longer than the original Homebrew prefix (/opt/homebrew = 13 chars).
@@ -40,11 +56,7 @@ async fn run(cli: Cli) -> Result<(), zb_core::Error> {
         }
     });
 
-    if let Commands::Init { no_modify_path } = cli.command {
-        return commands::init::execute(&root, &prefix, no_modify_path, &mut ui);
-    }
-
-    if !matches!(cli.command, Commands::Reset { .. }) {
+    if requires_init(&cli.command) {
         ensure_init(&root, &prefix, cli.auto_init, &mut ui)?;
     }
 
@@ -53,6 +65,7 @@ async fn run(cli: Cli) -> Result<(), zb_core::Error> {
     match cli.command {
         Commands::Init { .. } => unreachable!(),
         Commands::Completion { .. } => unreachable!(),
+        Commands::Search { .. } => unreachable!(),
         Commands::Install {
             formulas,
             no_link,
@@ -91,5 +104,28 @@ async fn run(cli: Cli) -> Result<(), zb_core::Error> {
         Commands::Run { formula, args } => {
             commands::run::execute(&mut installer, formula, args).await
         }
+    }
+}
+
+fn requires_init(command: &Commands) -> bool {
+    !matches!(
+        command,
+        Commands::Init { .. }
+            | Commands::Completion { .. }
+            | Commands::Reset { .. }
+            | Commands::Search { .. }
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::requires_init;
+    use zb_cli::cli::Commands;
+
+    #[test]
+    fn search_does_not_require_init() {
+        assert!(!requires_init(&Commands::Search {
+            query: vec!["code".to_string()],
+        }));
     }
 }

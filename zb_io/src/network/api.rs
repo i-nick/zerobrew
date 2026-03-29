@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use crate::checksum::verify_sha256_bytes;
@@ -67,6 +69,50 @@ struct FormulaSuggestionEntry {
     oldnames: Vec<String>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct CaskSearchEntry {
+    #[serde(default)]
+    token: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_string_list")]
+    name: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum StringOrVec {
+    String(String),
+    Vec(Vec<String>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PackageSearchKind {
+    Formula,
+    Cask,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageSearchResult {
+    pub kind: PackageSearchKind,
+    pub install_name: String,
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SearchMatchRank {
+    ExactCanonical,
+    ExactAlternate,
+    Prefix,
+    Substring,
+}
+
+#[derive(Debug, Clone)]
+struct SearchCandidate {
+    result: PackageSearchResult,
+    canonical_field: String,
+    alternate_fields: Vec<String>,
+    combined_fields: String,
+}
+
 #[derive(Debug)]
 pub struct ApiClient {
     base_url: String,
@@ -75,6 +121,123 @@ pub struct ApiClient {
     client: reqwest::Client,
     cache: Option<ApiCache>,
     formula_candidates: RwLock<Option<Arc<[String]>>>,
+}
+
+pub fn create_api_client_with_cache(root: &Path) -> Result<ApiClient, Error> {
+    create_api_client(root, true)
+}
+
+pub fn create_api_client_with_optional_cache(root: &Path) -> Result<ApiClient, Error> {
+    create_api_client(root, false)
+}
+
+fn create_api_client(root: &Path, create_cache_dir: bool) -> Result<ApiClient, Error> {
+    let client = match std::env::var("ZEROBREW_API_URL") {
+        Ok(url) => ApiClient::with_base_url(url)?,
+        Err(_) => ApiClient::new(),
+    };
+
+    let cache_path = root.join("cache").join("api-cache.sqlite");
+    if create_cache_dir {
+        std::fs::create_dir_all(root.join("cache"))
+            .map_err(Error::store("failed to create cache directory"))?;
+    } else if !cache_path.exists() {
+        return Ok(client);
+    }
+
+    let api_cache =
+        ApiCache::open(&cache_path).map_err(Error::store("failed to open API cache"))?;
+    Ok(client.with_cache(api_cache))
+}
+
+fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <Option<StringOrVec> as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(StringOrVec::String(value)) => vec![value],
+        Some(StringOrVec::Vec(values)) => values,
+        None => Vec::new(),
+    })
+}
+
+impl SearchCandidate {
+    fn new(result: PackageSearchResult, canonical: &str, alternates: Vec<String>) -> Self {
+        let canonical_field = normalize_search_text(canonical);
+        let alternate_fields = alternates
+            .into_iter()
+            .map(|value| normalize_search_text(&value))
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+
+        let mut combined_fields = Vec::with_capacity(1 + alternate_fields.len());
+        if !canonical_field.is_empty() {
+            combined_fields.push(canonical_field.clone());
+        }
+        combined_fields.extend(alternate_fields.iter().cloned());
+
+        Self {
+            result,
+            canonical_field,
+            alternate_fields,
+            combined_fields: combined_fields.join(" "),
+        }
+    }
+
+    fn classify(&self, query: &str, query_terms: &[String]) -> Option<SearchMatchRank> {
+        if self.canonical_field == query {
+            return Some(SearchMatchRank::ExactCanonical);
+        }
+
+        if self.alternate_fields.iter().any(|field| field == query) {
+            return Some(SearchMatchRank::ExactAlternate);
+        }
+
+        if !contains_all_terms(&self.combined_fields, query_terms) {
+            return None;
+        }
+
+        if is_prefix_match(&self.canonical_field, query, query_terms)
+            || self
+                .alternate_fields
+                .iter()
+                .any(|field| is_prefix_match(field, query, query_terms))
+            || is_prefix_match(&self.combined_fields, query, query_terms)
+        {
+            return Some(SearchMatchRank::Prefix);
+        }
+
+        Some(SearchMatchRank::Substring)
+    }
+}
+
+fn normalize_search_text(value: &str) -> String {
+    let mut normalized = String::with_capacity(value.len());
+    for ch in value.trim().chars() {
+        match ch {
+            '-' | '_' | '/' => normalized.push(' '),
+            _ => normalized.extend(ch.to_lowercase()),
+        }
+    }
+
+    normalized.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn contains_all_terms(haystack: &str, terms: &[String]) -> bool {
+    terms.iter().all(|term| haystack.contains(term))
+}
+
+fn is_prefix_match(field: &str, query: &str, query_terms: &[String]) -> bool {
+    if field.starts_with(query) {
+        return true;
+    }
+
+    let Some(first_term) = query_terms.first() else {
+        return false;
+    };
+
+    field.starts_with(first_term) && contains_all_terms(field, query_terms)
 }
 
 impl ApiClient {
@@ -356,6 +519,80 @@ impl ApiClient {
         }
     }
 
+    pub async fn get_all_casks_raw(&self) -> Result<String, Error> {
+        let url = format!("{}.json", self.cask_base_url);
+
+        match self.cached_get(&url).await? {
+            CachedGetResult::Cached(body) => Ok(body),
+            CachedGetResult::Fresh(response) => {
+                if !response.status().is_success() {
+                    return Err(Error::NetworkFailure {
+                        message: format!("bulk cask fetch returned HTTP {}", response.status()),
+                    });
+                }
+
+                let etag = response
+                    .headers()
+                    .get("etag")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                let last_modified = response
+                    .headers()
+                    .get("last-modified")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                let body = response
+                    .text()
+                    .await
+                    .map_err(Error::network("failed to read bulk cask response body"))?;
+
+                self.store_response_in_cache(&url, etag, last_modified, &body);
+                Ok(body)
+            }
+        }
+    }
+
+    pub async fn search_packages(&self, query: &str) -> Result<Vec<PackageSearchResult>, Error> {
+        let query = normalize_search_text(query);
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let query_terms = query
+            .split_whitespace()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+
+        let (formula_raw, cask_raw) =
+            tokio::try_join!(self.get_all_formulas_raw(), self.get_all_casks_raw())?;
+
+        let mut matches = Self::extract_formula_search_candidates(&formula_raw)?
+            .into_iter()
+            .chain(Self::extract_cask_search_candidates(&cask_raw)?)
+            .filter_map(|candidate| {
+                candidate
+                    .classify(&query, &query_terms)
+                    .map(|rank| (rank, candidate))
+            })
+            .collect::<Vec<_>>();
+
+        matches.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.result.kind.cmp(&b.1.result.kind))
+                .then_with(|| a.1.result.install_name.cmp(&b.1.result.install_name))
+        });
+
+        let mut seen = HashSet::new();
+        Ok(matches
+            .into_iter()
+            .filter_map(|(_, candidate)| {
+                seen.insert(candidate.result.install_name.clone())
+                    .then_some(candidate.result)
+            })
+            .collect())
+    }
+
     pub async fn suggest_formulas(&self, query: &str, limit: usize) -> Result<Vec<String>, Error> {
         if limit == 0 || query.trim().is_empty() {
             return Ok(Vec::new());
@@ -401,6 +638,76 @@ impl ApiClient {
             for oldname in &entry.oldnames {
                 Self::push_candidate(&mut candidates, &mut seen, Some(oldname.as_str()));
             }
+        }
+
+        Ok(candidates)
+    }
+
+    fn extract_formula_search_candidates(raw: &str) -> Result<Vec<SearchCandidate>, Error> {
+        let entries: Vec<FormulaSuggestionEntry> = serde_json::from_str(raw)
+            .map_err(Error::network("failed to parse bulk formula JSON"))?;
+
+        let mut candidates = Vec::new();
+        for entry in entries {
+            let Some(name) = entry.name.map(|value| value.trim().to_string()) else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+
+            let alternates = entry
+                .aliases
+                .into_iter()
+                .chain(entry.oldnames.into_iter())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>();
+
+            candidates.push(SearchCandidate::new(
+                PackageSearchResult {
+                    kind: PackageSearchKind::Formula,
+                    install_name: name.clone(),
+                    display_name: None,
+                },
+                &name,
+                alternates,
+            ));
+        }
+
+        Ok(candidates)
+    }
+
+    fn extract_cask_search_candidates(raw: &str) -> Result<Vec<SearchCandidate>, Error> {
+        let entries: Vec<CaskSearchEntry> =
+            serde_json::from_str(raw).map_err(Error::network("failed to parse bulk cask JSON"))?;
+
+        let mut candidates = Vec::new();
+        for entry in entries {
+            let Some(token) = entry.token.map(|value| value.trim().to_string()) else {
+                continue;
+            };
+            if token.is_empty() {
+                continue;
+            }
+
+            let names = entry
+                .name
+                .into_iter()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>();
+            let display_name = names.first().cloned();
+
+            candidates.push(SearchCandidate::new(
+                PackageSearchResult {
+                    kind: PackageSearchKind::Cask,
+                    install_name: format!("cask:{token}"),
+                    display_name,
+                },
+                &token,
+                names,
+            ));
         }
 
         Ok(candidates)
@@ -1229,6 +1536,31 @@ end
         assert_eq!(formulas[0].versions.stable, "1.2.3");
     }
 
+    #[tokio::test]
+    async fn get_all_casks_raw_returns_bulk_json() {
+        let mock_server = MockServer::start().await;
+        let bulk_body = r#"[
+            {"token":"visual-studio-code","name":["Visual Studio Code"]},
+            {"token":"zed","name":["Zed"]}
+        ]"#;
+
+        Mock::given(method("GET"))
+            .and(path("/cask.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(bulk_body))
+            .mount(&mock_server)
+            .await;
+
+        let client = ApiClient::with_base_url(format!("{}/formula", mock_server.uri()))
+            .unwrap()
+            .with_cask_base_url(format!("{}/cask", mock_server.uri()));
+        let raw = client.get_all_casks_raw().await.unwrap();
+
+        let casks: Vec<CaskSearchEntry> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(casks.len(), 2);
+        assert_eq!(casks[0].token.as_deref(), Some("visual-studio-code"));
+        assert_eq!(casks[0].name, vec!["Visual Studio Code".to_string()]);
+    }
+
     #[test]
     fn formula_suggestion_entry_defaults_optional_lists() {
         let entry: FormulaSuggestionEntry = serde_json::from_str(r#"{"name":"python"}"#).unwrap();
@@ -1236,6 +1568,17 @@ end
         assert_eq!(entry.name.as_deref(), Some("python"));
         assert!(entry.aliases.is_empty());
         assert!(entry.oldnames.is_empty());
+    }
+
+    #[test]
+    fn cask_search_entry_accepts_string_or_list_name_shapes() {
+        let single: CaskSearchEntry =
+            serde_json::from_str(r#"{"token":"ghostty","name":"Ghostty"}"#).unwrap();
+        let list: CaskSearchEntry =
+            serde_json::from_str(r#"{"token":"zed","name":["Zed","Zed Editor"]}"#).unwrap();
+
+        assert_eq!(single.name, vec!["Ghostty".to_string()]);
+        assert_eq!(list.name, vec!["Zed".to_string(), "Zed Editor".to_string()]);
     }
 
     #[test]
@@ -1308,5 +1651,95 @@ end
             .unwrap();
 
         assert!(suggestions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_packages_returns_ranked_formula_and_cask_results() {
+        let mock_server = MockServer::start().await;
+        let formulas = r#"[
+            {"name":"code-server","aliases":["code"]},
+            {"name":"codemod"},
+            {"name":"decode"}
+        ]"#;
+        let casks = r#"[
+            {"token":"codeedit","name":["CodeEdit"]},
+            {"token":"visual-studio-code","name":["Visual Studio Code"]}
+        ]"#;
+
+        Mock::given(method("GET"))
+            .and(path("/formula.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(formulas))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/cask.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(casks))
+            .mount(&mock_server)
+            .await;
+
+        let client = ApiClient::with_base_url(format!("{}/formula", mock_server.uri()))
+            .unwrap()
+            .with_cask_base_url(format!("{}/cask", mock_server.uri()));
+        let results = client.search_packages("code").await.unwrap();
+
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.install_name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "code-server",
+                "codemod",
+                "cask:codeedit",
+                "decode",
+                "cask:visual-studio-code"
+            ]
+        );
+        assert_eq!(results[0].kind, PackageSearchKind::Formula);
+        assert_eq!(results[2].kind, PackageSearchKind::Cask);
+        assert_eq!(
+            results[4].display_name.as_deref(),
+            Some("Visual Studio Code")
+        );
+    }
+
+    #[tokio::test]
+    async fn search_packages_matches_multi_term_cask_display_names() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/formula.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("[]"))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/cask.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                r#"[
+                    {"token":"visual-studio-code","name":["Visual Studio Code"]},
+                    {"token":"zed","name":["Zed"]}
+                ]"#,
+            ))
+            .mount(&mock_server)
+            .await;
+
+        let client = ApiClient::with_base_url(format!("{}/formula", mock_server.uri()))
+            .unwrap()
+            .with_cask_base_url(format!("{}/cask", mock_server.uri()));
+        let results = client.search_packages("visual code").await.unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].install_name, "cask:visual-studio-code");
+    }
+
+    #[test]
+    fn optional_api_cache_does_not_create_directories() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join("uninitialized-root");
+
+        let _client = create_api_client_with_optional_cache(&root).unwrap();
+
+        assert!(!root.exists());
+        assert!(!root.join("cache").exists());
     }
 }

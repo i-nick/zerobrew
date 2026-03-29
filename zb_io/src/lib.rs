@@ -17,7 +17,9 @@ pub use installer::{
     Installer, OutdatedPackage, RepairSummary, create_installer, get_homebrew_packages,
 };
 pub use network::{
-    ApiCache, ApiClient, DownloadProgressCallback, DownloadRequest, Downloader, ParallelDownloader,
+    ApiCache, ApiClient, DownloadProgressCallback, DownloadRequest, Downloader, PackageSearchKind,
+    PackageSearchResult, ParallelDownloader, create_api_client_with_cache,
+    create_api_client_with_optional_cache,
 };
 pub use path::validate_privileged_path;
 pub use progress::{InstallProgress, ProgressCallback};

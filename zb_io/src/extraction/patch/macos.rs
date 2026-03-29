@@ -133,7 +133,7 @@ fn patch_macho_binary_strings(path: &Path, new_prefix: &str) -> Result<(), Error
             // legitimately reference shorter prefixes like /usr/local for
             // system libraries (not Homebrew paths).
             //
-            // See: https://github.com/lucasgelfond/zerobrew/issues/286
+            // See: https://github.com/i-nick/zerobrew/issues/286
             let has_old_paths = contents
                 .windows(old_bytes.len() + 1)
                 .any(|w| w[..old_bytes.len()] == *old_bytes && w[old_bytes.len()] == b'/');
@@ -145,7 +145,7 @@ fn patch_macho_binary_strings(path: &Path, new_prefix: &str) -> Result<(), Error
                     "binary contains hardcoded paths under {old_prefix} that \
                     could not be rewritten to {new_prefix} (new path is longer). \
                     this package may not work correctly
-                    tracking issue: https://github.com/lucasgelfond/zerobrew/issues/286
+                    tracking issue: https://github.com/i-nick/zerobrew/issues/286
                     ",
                 );
             }

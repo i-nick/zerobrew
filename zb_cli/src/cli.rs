@@ -109,6 +109,21 @@ mod tests {
         let result = Cli::try_parse_from(["zb", "upgrade", "--casks", "cask:zed"]);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn search_accepts_single_term() {
+        let cli = Cli::try_parse_from(["zb", "search", "code"]).unwrap();
+        assert!(matches!(cli.command, super::Commands::Search { .. }));
+    }
+
+    #[test]
+    fn search_preserves_multiple_terms() {
+        let cli = Cli::try_parse_from(["zb", "search", "visual", "code"]).unwrap();
+        let super::Commands::Search { query } = cli.command else {
+            panic!("expected search command");
+        };
+        assert_eq!(query, vec!["visual".to_string(), "code".to_string()]);
+    }
 }
 
 #[derive(Subcommand)]
@@ -130,6 +145,10 @@ pub enum Commands {
         formulas: Vec<String>,
         #[arg(long)]
         casks: bool,
+    },
+    Search {
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
     },
     #[command(visible_alias = "remove")]
     Uninstall {

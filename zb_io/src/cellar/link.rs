@@ -641,7 +641,7 @@ mod tests {
     #[test]
     fn symlink_to_directory_in_keg_expands_without_conflict() {
         // Reproduces the gnu-sed / gnu-tar / findutils conflict from issue #69:
-        // https://github.com/lucasgelfond/zerobrew/issues/69
+        // https://github.com/i-nick/zerobrew/issues/69
         // each keg has `libexec/gnubin/man -> ../gnuman` (symlink to directory).
         // The linker should expand these into individual file symlinks so that
         // man pages from different kegs coexist.

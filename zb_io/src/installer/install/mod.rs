@@ -15,7 +15,7 @@ use tracing::warn;
 use crate::cellar::link::Linker;
 use crate::cellar::materialize::Cellar;
 use crate::network::api::ApiClient;
-use crate::network::cache::ApiCache;
+use crate::network::create_api_client_with_cache;
 use crate::network::download::{DownloadProgressCallback, DownloadRequest, ParallelDownloader};
 use crate::progress::{InstallProgress, ProgressCallback};
 use crate::storage::blob::BlobCache;
@@ -308,18 +308,7 @@ pub fn create_installer(
 
     fs::create_dir_all(root.join("db")).map_err(Error::store("failed to create db directory"))?;
 
-    fs::create_dir_all(root.join("cache"))
-        .map_err(Error::store("failed to create cache directory"))?;
-
-    let api_cache_path = root.join("cache/api-cache.sqlite");
-    let api_cache =
-        ApiCache::open(&api_cache_path).map_err(Error::store("failed to open API cache"))?;
-
-    let api_client = match std::env::var("ZEROBREW_API_URL") {
-        Ok(url) => ApiClient::with_base_url(url)?,
-        Err(_) => ApiClient::new(),
-    }
-    .with_cache(api_cache);
+    let api_client = create_api_client_with_cache(root)?;
 
     let blob_cache =
         BlobCache::new(&root.join("cache")).map_err(Error::store("failed to create blob cache"))?;
