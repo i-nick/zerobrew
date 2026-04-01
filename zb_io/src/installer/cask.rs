@@ -17,6 +17,11 @@ pub struct CaskApp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaskZap {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCask {
     pub install_name: String,
     pub token: String,
@@ -25,6 +30,7 @@ pub struct ResolvedCask {
     pub sha256: String,
     pub binaries: Vec<CaskBinary>,
     pub apps: Vec<CaskApp>,
+    pub zap: CaskZap,
     pub has_pkg: bool,
     pub has_preflight: bool,
 }
@@ -54,15 +60,16 @@ pub fn resolve_cask(token: &str, cask: &Value) -> Result<ResolvedCask, Error> {
 
     let binaries = parse_binary_artifacts(cask)?;
     let apps = parse_app_artifacts(cask)?;
+    let zap = parse_zap(cask)?;
     let has_pkg = has_artifact_type(cask, "pkg");
     let has_preflight = has_artifact_type(cask, "preflight");
 
-    if binaries.is_empty() {
+    if binaries.is_empty() && apps.is_empty() {
         let found = artifact_types(cask);
         return Err(Error::InvalidArgument {
             message: format!(
-                "cask '{token}' has no binary artifacts (found: {found}); \
-                 only casks with 'binary' artifacts are currently supported"
+                "cask '{token}' has no supported installable artifacts (found: {found}); \
+                 only casks with 'app' or 'binary' artifacts are currently supported"
             ),
         });
     }
@@ -90,6 +97,7 @@ pub fn resolve_cask(token: &str, cask: &Value) -> Result<ResolvedCask, Error> {
         sha256,
         binaries,
         apps,
+        zap,
         has_pkg,
         has_preflight,
     })
@@ -161,6 +169,7 @@ fn current_macos_major_version() -> Option<u32> {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn arm64_macos_variation_key_for_major(major: u32) -> Option<&'static str> {
     match major {
+        27.. => Some("arm64_tahoe"),
         26 => Some("arm64_tahoe"),
         15 => Some("arm64_sequoia"),
         14 => Some("arm64_sonoma"),
@@ -224,6 +233,57 @@ fn parse_app_artifacts(cask: &Value) -> Result<Vec<CaskApp>, Error> {
         let (source, target) = parse_app_entry(entry)?;
         Ok(CaskApp { source, target })
     })
+}
+
+fn parse_zap(cask: &Value) -> Result<CaskZap, Error> {
+    let mut paths = Vec::new();
+    let artifacts = cask
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .ok_or_else(|| Error::InvalidArgument {
+            message: "failed to parse cask JSON: missing artifacts array".to_string(),
+        })?;
+
+    for artifact in artifacts {
+        let Some(raw) = artifact.get("zap") else {
+            continue;
+        };
+
+        let entries = raw.as_array().ok_or_else(|| Error::InvalidArgument {
+            message: "unsupported cask zap artifact shape".to_string(),
+        })?;
+
+        for entry in entries {
+            let obj = entry.as_object().ok_or_else(|| Error::InvalidArgument {
+                message: "unsupported cask zap entry shape".to_string(),
+            })?;
+
+            for key in ["trash", "rmdir"] {
+                let Some(values) = obj.get(key) else {
+                    continue;
+                };
+
+                match values {
+                    Value::String(value) => paths.push(value.to_string()),
+                    Value::Array(values) => {
+                        for value in values {
+                            let value = value.as_str().ok_or_else(|| Error::InvalidArgument {
+                                message: format!("unsupported cask zap {key} entry shape"),
+                            })?;
+                            paths.push(value.to_string());
+                        }
+                    }
+                    _ => {
+                        return Err(Error::InvalidArgument {
+                            message: format!("unsupported cask zap {key} entry shape"),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(CaskZap { paths })
 }
 
 fn parse_artifact_entries<T>(
@@ -430,6 +490,13 @@ mod tests {
         );
     }
 
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn arm64_variation_key_uses_tahoe_for_newer_macos_versions() {
+        assert_eq!(arm64_macos_variation_key_for_major(27), Some("arm64_tahoe"));
+        assert_eq!(arm64_macos_variation_key_for_major(30), Some("arm64_tahoe"));
+    }
+
     #[test]
     fn resolve_cask_parses_binary_targets() {
         let cask = serde_json::json!({
@@ -495,6 +562,23 @@ mod tests {
     }
 
     #[test]
+    fn resolve_cask_supports_app_only_casks() {
+        let cask = serde_json::json!({
+            "token": "brave-browser",
+            "version": "1.0.0",
+            "url": "https://example.com/Brave-Browser.dmg",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifacts": [
+                { "app": ["Brave Browser.app"] }
+            ]
+        });
+
+        let resolved = resolve_cask("brave-browser", &cask).unwrap();
+        assert_eq!(resolved.apps.len(), 1);
+        assert!(resolved.binaries.is_empty());
+    }
+
+    #[test]
     fn resolve_cask_missing_required_field_is_invalid_argument() {
         let cask = serde_json::json!({
             "token": "test",
@@ -521,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_cask_no_binary_artifacts_lists_found_types() {
+    fn resolve_cask_supports_app_casks_with_ignored_extras_and_zap() {
         let cask = serde_json::json!({
             "token": "ghostty",
             "version": "1.0.0",
@@ -529,14 +613,36 @@ mod tests {
             "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "artifacts": [
                 { "app": ["Ghostty.app"] },
+                { "manpage": ["$APPDIR/Ghostty.app/Contents/Resources/man/man1/ghostty.1"] },
+                { "bash_completion": ["$APPDIR/Ghostty.app/Contents/Resources/bash-completion/completions/ghostty.bash"] },
+                { "zap": [{ "trash": ["~/.config/ghostty/"] }] }
+            ]
+        });
+
+        let resolved = resolve_cask("ghostty", &cask).unwrap();
+        assert_eq!(resolved.apps.len(), 1);
+        assert!(resolved.binaries.is_empty());
+        assert_eq!(resolved.zap.paths, vec!["~/.config/ghostty/".to_string()]);
+    }
+
+    #[test]
+    fn resolve_cask_rejects_casks_without_supported_installable_artifacts() {
+        let cask = serde_json::json!({
+            "token": "ghostty",
+            "version": "1.0.0",
+            "url": "https://example.com/Ghostty.dmg",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifacts": [
                 { "zap": [{ "trash": ["~/.config/ghostty/"] }] }
             ]
         });
 
         let err = resolve_cask("ghostty", &cask).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("no binary artifacts"), "got: {msg}");
-        assert!(msg.contains("app"), "got: {msg}");
+        assert!(
+            msg.contains("no supported installable artifacts"),
+            "got: {msg}"
+        );
         assert!(msg.contains("zap"), "got: {msg}");
     }
 
@@ -591,5 +697,28 @@ mod tests {
 
         let err = resolve_cask("pkg-app", &cask).unwrap_err();
         assert!(err.to_string().contains("pkg-installed APPDIR binaries"));
+    }
+
+    #[test]
+    fn resolve_cask_parses_zap_trash_and_rmdir_entries() {
+        let cask = serde_json::json!({
+            "token": "brave-browser",
+            "version": "1.0.0",
+            "url": "https://example.com/Brave-Browser.dmg",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifacts": [
+                { "app": ["Brave Browser.app"] },
+                { "zap": [{ "trash": ["~/Library/Caches/com.brave.Browser"], "rmdir": ["~/Library/Caches/BraveSoftware"] }] }
+            ]
+        });
+
+        let resolved = resolve_cask("brave-browser", &cask).unwrap();
+        assert_eq!(
+            resolved.zap.paths,
+            vec![
+                "~/Library/Caches/com.brave.Browser".to_string(),
+                "~/Library/Caches/BraveSoftware".to_string()
+            ]
+        );
     }
 }

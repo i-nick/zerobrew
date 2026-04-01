@@ -21,6 +21,13 @@ use tempfile::TempDir;
 
 use super::{Installer, MAX_CORRUPTION_RETRIES, PlannedInstall};
 
+const CASK_METADATA_FILE: &str = ".zerobrew-cask.json";
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub(super) struct InstalledCaskMetadata {
+    pub zap_paths: Vec<String>,
+}
+
 impl Installer {
     pub(super) async fn process_bottle_item(
         &mut self,
@@ -274,7 +281,28 @@ impl Installer {
             verify_app_conflicts(&self.db, &cask, &previous_external_paths)?;
         }
 
-        if crate::extraction::is_archive(&blob_path)? {
+        if should_mount_dmg_directly(&cask) {
+            #[cfg(target_os = "macos")]
+            {
+                let mounted = MountedDmg::attach(&blob_path, &cask)?;
+                install_cask_from_root(
+                    mounted.path(),
+                    &keg_path,
+                    &cask,
+                    &previous_external_paths,
+                    &mut cleanup,
+                )?;
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                return Err(Error::InvalidArgument {
+                    message: format!(
+                        "cask '{}' installs app bundles, which are only supported on macOS",
+                        cask.token
+                    ),
+                });
+            }
+        } else if crate::extraction::is_archive(&blob_path)? {
             let extracted = self.store.ensure_entry(&cask.sha256, &blob_path)?;
             install_cask_from_root(
                 &extracted,
@@ -307,6 +335,13 @@ impl Installer {
         } else {
             stage_raw_cask_binary(&blob_path, &keg_path, &cask)?;
         }
+
+        write_cask_metadata(
+            &keg_path,
+            &InstalledCaskMetadata {
+                zap_paths: cask.zap.paths.clone(),
+            },
+        )?;
 
         let linked_files = if link {
             self.linker.link_keg(&keg_path)?
@@ -345,6 +380,34 @@ impl Installer {
 
         Ok(())
     }
+}
+
+fn should_mount_dmg_directly(cask: &crate::installer::cask::ResolvedCask) -> bool {
+    has_app_backed_payload(cask)
+        && cask
+            .url
+            .split('?')
+            .next()
+            .is_some_and(|url| url.to_ascii_lowercase().ends_with(".dmg"))
+}
+
+pub(super) fn read_cask_metadata(keg_path: &Path) -> Result<InstalledCaskMetadata, Error> {
+    let metadata_path = keg_path.join(CASK_METADATA_FILE);
+    match fs::read(&metadata_path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map_err(Error::store("failed to parse installed cask metadata")),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            Ok(InstalledCaskMetadata::default())
+        }
+        Err(err) => Err(Error::store("failed to read installed cask metadata")(err)),
+    }
+}
+
+fn write_cask_metadata(keg_path: &Path, metadata: &InstalledCaskMetadata) -> Result<(), Error> {
+    let metadata_path = keg_path.join(CASK_METADATA_FILE);
+    let bytes =
+        serde_json::to_vec(metadata).map_err(Error::store("failed to serialize cask metadata"))?;
+    fs::write(metadata_path, bytes).map_err(Error::store("failed to write cask metadata"))
 }
 
 pub(super) fn dependency_cellar_path(
@@ -952,6 +1015,28 @@ mod tests {
         }
     }
 
+    fn empty_zap() -> crate::installer::cask::CaskZap {
+        crate::installer::cask::CaskZap { paths: Vec::new() }
+    }
+
+    fn app_only_cask(url: &str, token: &str) -> crate::installer::cask::ResolvedCask {
+        crate::installer::cask::ResolvedCask {
+            install_name: format!("cask:{token}"),
+            token: token.to_string(),
+            version: "1.0.0".to_string(),
+            url: url.to_string(),
+            sha256: "aaa".to_string(),
+            binaries: Vec::new(),
+            apps: vec![crate::installer::cask::CaskApp {
+                source: format!("{}.app", token),
+                target: format!("{}.app", token),
+            }],
+            zap: empty_zap(),
+            has_pkg: false,
+            has_preflight: false,
+        }
+    }
+
     #[test]
     fn dependency_cellar_path_uses_formula_token_for_tap_name() {
         let tmp = TempDir::new().unwrap();
@@ -989,6 +1074,15 @@ mod tests {
     }
 
     #[test]
+    fn should_mount_dmg_directly_for_app_backed_dmg_urls() {
+        let brave = app_only_cask("https://example.com/brave-browser.dmg", "Brave Browser");
+        assert!(should_mount_dmg_directly(&brave));
+
+        let zipped = app_only_cask("https://example.com/ghostty.zip", "Ghostty");
+        assert!(!should_mount_dmg_directly(&zipped));
+    }
+
+    #[test]
     fn stage_raw_cask_binary_copies_and_marks_executable() {
         let tmp = TempDir::new().unwrap();
         let blob_path = tmp.path().join("claude");
@@ -1006,6 +1100,7 @@ mod tests {
                 target: "claude".to_string(),
             }],
             apps: Vec::new(),
+            zap: empty_zap(),
             has_pkg: false,
             has_preflight: false,
         };
@@ -1051,6 +1146,7 @@ mod tests {
                 },
             ],
             apps: Vec::new(),
+            zap: empty_zap(),
             has_pkg: false,
             has_preflight: false,
         };
@@ -1081,6 +1177,7 @@ mod tests {
                 source: "Zed.app".to_string(),
                 target: "Zed.app".to_string(),
             }],
+            zap: empty_zap(),
             has_pkg: false,
             has_preflight: false,
         };
@@ -1118,6 +1215,7 @@ mod tests {
                 source: "Thorium.app".to_string(),
                 target: "Thorium.app".to_string(),
             }],
+            zap: empty_zap(),
             has_pkg: false,
             has_preflight: true,
         };
@@ -1140,6 +1238,46 @@ mod tests {
                 ]
             }}"#
         )
+    }
+
+    #[cfg(target_os = "macos")]
+    fn app_only_cask_json(
+        mock_server_uri: &str,
+        token: &str,
+        app_name: &str,
+        version: &str,
+        sha256: &str,
+    ) -> String {
+        serde_json::json!({
+            "token": token,
+            "version": version,
+            "url": format!("{mock_server_uri}/{token}-{version}.dmg"),
+            "sha256": sha256,
+            "artifacts": [
+                { "app": [app_name] }
+            ]
+        })
+        .to_string()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn ghostty_style_cask_json(mock_server_uri: &str, version: &str, sha256: &str) -> String {
+        serde_json::json!({
+            "token": "ghostty",
+            "version": version,
+            "url": format!("{mock_server_uri}/ghostty-{version}.dmg"),
+            "sha256": sha256,
+            "artifacts": [
+                { "app": ["Ghostty.app"] },
+                { "manpage": ["$APPDIR/Ghostty.app/Contents/Resources/man/man1/ghostty.1"] },
+                { "manpage": ["$APPDIR/Ghostty.app/Contents/Resources/man/man5/ghostty.5"] },
+                { "bash_completion": ["$APPDIR/Ghostty.app/Contents/Resources/bash-completion/completions/ghostty.bash"] },
+                { "fish_completion": ["$APPDIR/Ghostty.app/Contents/Resources/fish/vendor_completions.d/ghostty.fish"] },
+                { "zsh_completion": ["$APPDIR/Ghostty.app/Contents/Resources/zsh/site-functions/_ghostty"] },
+                { "zap": [{ "trash": ["~/.config/ghostty"], "rmdir": ["~/Library/Caches/Ghostty"] }] }
+            ]
+        })
+        .to_string()
     }
 
     #[cfg(target_os = "macos")]
@@ -1224,6 +1362,116 @@ mod tests {
         installer.uninstall("cask:zed").unwrap();
         assert!(!home.join("Applications/Zed.app").exists());
         assert!(!prefix.join("bin/zed").exists());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn install_app_only_cask_places_app_without_binary_links() {
+        let _home_lock = HOME_ENV_LOCK.lock().unwrap();
+        let mock_server = MockServer::start().await;
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let _home_override = HomeOverride::set(&home);
+
+        let dmg = create_cask_dmg(
+            "Brave Browser.app",
+            "Contents/MacOS/Brave Browser",
+            "#!/bin/sh\necho brave",
+        );
+        let dmg_sha = sha256_hex(&dmg);
+
+        Mock::given(method("GET"))
+            .and(path("/brave-browser.json"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(app_only_cask_json(
+                    &mock_server.uri(),
+                    "brave-browser",
+                    "Brave Browser.app",
+                    "1.0.0",
+                    &dmg_sha,
+                )),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/brave-browser-1.0.0.dmg"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(dmg))
+            .mount(&mock_server)
+            .await;
+
+        let root = tmp.path().join("zerobrew");
+        let prefix = tmp.path().join("prefix");
+        let mut installer = make_installer(&root, &prefix, mock_server.uri());
+
+        installer
+            .install(&["cask:brave-browser".to_string()], true)
+            .await
+            .unwrap();
+
+        assert!(home.join("Applications/Brave Browser.app").exists());
+        assert!(!prefix.join("bin/brave-browser").exists());
+
+        installer.uninstall("cask:brave-browser").unwrap();
+        assert!(!home.join("Applications/Brave Browser.app").exists());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn install_ghostty_style_cask_ignores_extra_artifacts_and_uninstalls_with_zap() {
+        let _home_lock = HOME_ENV_LOCK.lock().unwrap();
+        let mock_server = MockServer::start().await;
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let _home_override = HomeOverride::set(&home);
+
+        let dmg = create_cask_dmg(
+            "Ghostty.app",
+            "Contents/MacOS/ghostty",
+            "#!/bin/sh\necho ghostty",
+        );
+        let dmg_sha = sha256_hex(&dmg);
+
+        Mock::given(method("GET"))
+            .and(path("/ghostty.json"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(ghostty_style_cask_json(
+                    &mock_server.uri(),
+                    "1.0.0",
+                    &dmg_sha,
+                )),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/ghostty-1.0.0.dmg"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(dmg))
+            .mount(&mock_server)
+            .await;
+
+        let root = tmp.path().join("zerobrew");
+        let prefix = tmp.path().join("prefix");
+        let mut installer = make_installer(&root, &prefix, mock_server.uri());
+
+        installer
+            .install(&["cask:ghostty".to_string()], true)
+            .await
+            .unwrap();
+
+        let zap_file = home.join(".config/ghostty");
+        let zap_dir = home.join("Library/Caches/Ghostty");
+        fs::create_dir_all(zap_file.parent().unwrap()).unwrap();
+        fs::create_dir_all(zap_dir.join("nested")).unwrap();
+        fs::write(&zap_file, "ghostty config").unwrap();
+
+        installer.uninstall("cask:ghostty").unwrap();
+
+        assert!(!home.join("Applications/Ghostty.app").exists());
+        assert!(!zap_file.exists());
+        assert!(!zap_dir.exists());
     }
 
     #[cfg(target_os = "macos")]

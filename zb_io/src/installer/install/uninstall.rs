@@ -1,8 +1,10 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use zb_core::{Error, formula_token};
 
 use super::Installer;
+use super::bottle::read_cask_metadata;
 
 impl Installer {
     pub fn uninstall(&mut self, name: &str) -> Result<(), Error> {
@@ -13,9 +15,14 @@ impl Installer {
         let recorded_paths = self.db.list_keg_files_for_name(name)?;
 
         let keg_path = self.cellar.keg_path(keg_name, &installed.version);
+        let zap_paths = if installed.name.starts_with("cask:") {
+            read_cask_metadata(&keg_path)?.zap_paths
+        } else {
+            Vec::new()
+        };
         self.linker.unlink_keg(&keg_path)?;
         for record in &recorded_paths {
-            let path = std::path::Path::new(&record.linked_path);
+            let path = Path::new(&record.linked_path);
             if !path.starts_with(&self.prefix) {
                 remove_recorded_path(path)?;
             }
@@ -28,6 +35,7 @@ impl Installer {
         }
 
         self.cellar.remove_keg(keg_name, &installed.version)?;
+        remove_zap_paths(&zap_paths)?;
 
         Ok(())
     }
@@ -66,14 +74,56 @@ fn remove_recorded_path(path: &std::path::Path) -> Result<(), Error> {
     Ok(())
 }
 
+fn remove_zap_paths(paths: &[String]) -> Result<(), Error> {
+    for raw_path in paths {
+        let path = expand_zap_path(raw_path)?;
+        remove_recorded_path(&path)?;
+    }
+
+    Ok(())
+}
+
+fn expand_zap_path(raw_path: &str) -> Result<PathBuf, Error> {
+    let path = if raw_path == "~" {
+        PathBuf::from(std::env::var("HOME").map_err(|_| Error::InvalidArgument {
+            message: "HOME must be set to expand cask zap paths".to_string(),
+        })?)
+    } else if let Some(stripped) = raw_path.strip_prefix("~/") {
+        PathBuf::from(std::env::var("HOME").map_err(|_| Error::InvalidArgument {
+            message: "HOME must be set to expand cask zap paths".to_string(),
+        })?)
+        .join(stripped)
+    } else {
+        PathBuf::from(raw_path)
+    };
+
+    if !path.is_absolute() {
+        return Err(Error::InvalidArgument {
+            message: format!(
+                "invalid cask zap path '{}': path must be absolute or start with '~/'",
+                raw_path
+            ),
+        });
+    }
+
+    crate::validate_privileged_path(&path).map_err(|err| Error::InvalidArgument {
+        message: format!("invalid cask zap path '{}': {}", raw_path, err),
+    })?;
+
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::fs;
+    use std::path::Path;
 
     use tempfile::TempDir;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    use super::{expand_zap_path, remove_zap_paths};
     use crate::cellar::Cellar;
     use crate::installer::install::test_support::*;
     use crate::network::api::ApiClient;
@@ -81,6 +131,63 @@ mod tests {
     use crate::storage::db::Database;
     use crate::storage::store::Store;
     use crate::{Installer, Linker};
+
+    struct HomeOverride {
+        previous: Option<OsString>,
+    }
+
+    impl HomeOverride {
+        fn set(path: &Path) -> Self {
+            let previous = std::env::var_os("HOME");
+            unsafe {
+                std::env::set_var("HOME", path);
+            }
+            Self { previous }
+        }
+    }
+
+    impl Drop for HomeOverride {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(previous) = self.previous.take() {
+                    std::env::set_var("HOME", previous);
+                } else {
+                    std::env::remove_var("HOME");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn expand_zap_path_expands_tilde() {
+        let tmp = TempDir::new().unwrap();
+        let _home = HomeOverride::set(tmp.path());
+
+        let expanded = expand_zap_path("~/Library/Caches/Test").unwrap();
+        assert_eq!(expanded, tmp.path().join("Library/Caches/Test"));
+    }
+
+    #[test]
+    fn remove_zap_paths_ignores_missing_paths() {
+        let tmp = TempDir::new().unwrap();
+        let _home = HomeOverride::set(tmp.path());
+
+        let result = remove_zap_paths(&["~/does-not-exist".to_string()]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn expand_zap_path_rejects_relative_paths() {
+        let err = expand_zap_path("relative/path").unwrap_err();
+        assert!(err.to_string().contains("absolute or start with '~/'"));
+    }
+
+    #[test]
+    fn expand_zap_path_rejects_parent_traversal() {
+        let err = expand_zap_path("/tmp/../evil").unwrap_err();
+        assert!(err.to_string().contains("invalid cask zap path"));
+        assert!(err.to_string().contains("'..'"));
+    }
 
     #[tokio::test]
     async fn uninstall_cleans_everything() {
