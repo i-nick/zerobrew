@@ -960,9 +960,11 @@ mod tests {
     use std::ffi::OsString;
     use std::fs;
     #[cfg(target_os = "macos")]
-    use std::sync::{LazyLock, Mutex};
+    use std::sync::LazyLock;
 
     use tempfile::TempDir;
+    #[cfg(target_os = "macos")]
+    use tokio::sync::Mutex;
     #[cfg(target_os = "macos")]
     use wiremock::matchers::{method, path};
     #[cfg(target_os = "macos")]
@@ -1307,7 +1309,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn install_cask_dmg_places_app_and_uninstalls_cleanly() {
-        let _home_lock = HOME_ENV_LOCK.lock().unwrap();
+        let _home_lock = HOME_ENV_LOCK.lock().await;
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
         let home = tmp.path().join("home");
@@ -1367,7 +1369,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn install_app_only_cask_places_app_without_binary_links() {
-        let _home_lock = HOME_ENV_LOCK.lock().unwrap();
+        let _home_lock = HOME_ENV_LOCK.lock().await;
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
         let home = tmp.path().join("home");
@@ -1420,7 +1422,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn install_ghostty_style_cask_ignores_extra_artifacts_and_uninstalls_with_zap() {
-        let _home_lock = HOME_ENV_LOCK.lock().unwrap();
+        let _home_lock = HOME_ENV_LOCK.lock().await;
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
         let home = tmp.path().join("home");
@@ -1477,7 +1479,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn install_cask_dmg_honors_no_link() {
-        let _home_lock = HOME_ENV_LOCK.lock().unwrap();
+        let _home_lock = HOME_ENV_LOCK.lock().await;
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
         let home = tmp.path().join("home");
@@ -1523,7 +1525,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn reinstall_cask_replaces_owned_app_bundle() {
-        let _home_lock = HOME_ENV_LOCK.lock().unwrap();
+        let _home_lock = HOME_ENV_LOCK.lock().await;
         let first_server = MockServer::start().await;
         let second_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
@@ -1587,7 +1589,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn install_cask_reports_conflict_for_unowned_app_bundle() {
-        let _home_lock = HOME_ENV_LOCK.lock().unwrap();
+        let _home_lock = HOME_ENV_LOCK.lock().await;
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
         let home = tmp.path().join("home");

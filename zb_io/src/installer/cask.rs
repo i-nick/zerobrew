@@ -113,7 +113,7 @@ fn required_string(value: &Value, field: &str) -> Result<String, Error> {
         })
 }
 
-fn select_platform_variation<'a>(cask: &'a Value) -> Option<&'a Value> {
+fn select_platform_variation(cask: &Value) -> Option<&Value> {
     let key = current_platform_variation_key()?;
     select_platform_variation_for_key(cask, key)
 }
@@ -135,7 +135,7 @@ fn current_platform_variation_key() -> Option<&'static str> {
     }
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
-        return current_macos_major_version().and_then(arm64_macos_variation_key_for_major);
+        current_macos_major_version().and_then(arm64_macos_variation_key_for_major)
     }
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
     {

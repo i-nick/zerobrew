@@ -222,7 +222,7 @@ end
             .with_tap_raw_base_url(server.uri());
         let blob_cache = BlobCache::new(&root.join("cache")).unwrap();
         let store = Store::new(root).unwrap();
-        let cellar = Cellar::new(&root).unwrap();
+        let cellar = Cellar::new(root).unwrap();
         let linker = Linker::new(prefix).unwrap();
         let db = Database::open(&root.join("db/zb.sqlite3")).unwrap();
 
