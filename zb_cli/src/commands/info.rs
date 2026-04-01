@@ -1,12 +1,14 @@
 use chrono::{DateTime, Local};
 use console::style;
+use zb_io::InstalledKeg;
 
 pub fn execute(installer: &mut zb_io::Installer, formula: String) -> Result<(), zb_core::Error> {
     if let Some(keg) = installer.get_installed(&formula) {
-        print_field("Name:", style(&keg.name).bold());
-        print_field("Version:", &keg.version);
-        print_field("Store key:", &keg.store_key[..12]);
-        print_field("Installed:", format_timestamp(keg.installed_at));
+        let fields = installed_keg_fields(&keg);
+        print_field("Name:", style(&fields.name).bold());
+        print_field("Version:", &fields.version);
+        print_field("Store key:", &fields.store_key);
+        print_field("Installed:", &fields.installed);
     } else {
         println!("Formula '{}' is not installed.", formula);
     }
@@ -16,6 +18,22 @@ pub fn execute(installer: &mut zb_io::Installer, formula: String) -> Result<(), 
 
 fn print_field(label: &str, value: impl std::fmt::Display) {
     println!("{:<10}  {}", style(label).dim(), value);
+}
+
+struct InstalledKegFields {
+    name: String,
+    version: String,
+    store_key: String,
+    installed: String,
+}
+
+fn installed_keg_fields(keg: &InstalledKeg) -> InstalledKegFields {
+    InstalledKegFields {
+        name: keg.name.clone(),
+        version: keg.version.clone(),
+        store_key: keg.store_key[..12].to_string(),
+        installed: format_timestamp(keg.installed_at),
+    }
 }
 
 fn format_timestamp(timestamp: i64) -> String {
@@ -46,5 +64,24 @@ fn format_timestamp(timestamp: i64) -> String {
             }
         }
         None => "invalid timestamp".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::installed_keg_fields;
+    use zb_io::InstalledKeg;
+
+    #[test]
+    fn installed_keg_fields_preserves_full_tap_name() {
+        let fields = installed_keg_fields(&InstalledKeg {
+            name: "hashicorp/tap/terraform".to_string(),
+            version: "1.10.0".to_string(),
+            store_key: "deadbeefcafebabedeadbeefcafebabe".to_string(),
+            installed_at: 1_700_000_000,
+        });
+
+        assert_eq!(fields.name, "hashicorp/tap/terraform");
+        assert_eq!(fields.version, "1.10.0");
     }
 }

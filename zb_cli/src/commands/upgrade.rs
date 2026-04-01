@@ -142,3 +142,169 @@ fn ui_error(err: std::io::Error) -> zb_core::Error {
         message: format!("failed to write CLI output: {err}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::execute;
+    use crate::ui::Ui;
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::fs;
+    use std::io::Write;
+    use tar::Builder;
+    use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use zb_io::network::api::ApiClient;
+    use zb_io::{BlobCache, Cellar, Database, Installer, Linker, Store};
+
+    fn create_bottle_tarball(formula_name: &str, version: &str) -> Vec<u8> {
+        let mut builder = Builder::new(Vec::new());
+
+        let mut header = tar::Header::new_gnu();
+        header
+            .set_path(format!("{formula_name}/{version}/bin/{formula_name}"))
+            .unwrap();
+        let content = format!("#!/bin/sh\necho {formula_name} {version}");
+        header.set_size(content.len() as u64);
+        header.set_mode(0o755);
+        header.set_cksum();
+
+        builder.append(&header, content.as_bytes()).unwrap();
+
+        let tar_data = builder.into_inner().unwrap();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&tar_data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn sha256_hex(data: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        format!("{:x}", hasher.finalize())
+    }
+
+    fn get_test_bottle_tag() -> &'static str {
+        if cfg!(target_os = "linux") {
+            "x86_64_linux"
+        } else if cfg!(target_arch = "x86_64") {
+            "sonoma"
+        } else {
+            "arm64_sonoma"
+        }
+    }
+
+    fn tap_formula_rb(mock_server_uri: &str, version: &str, sha256: &str) -> String {
+        let tag = get_test_bottle_tag();
+        format!(
+            r#"
+class Terraform < Formula
+  version "{version}"
+  bottle do
+    root_url "{mock_server_uri}/v2/hashicorp/tap"
+    sha256 {tag}: "{sha256}"
+  end
+end
+"#
+        )
+    }
+
+    fn make_installer(
+        root: &std::path::Path,
+        prefix: &std::path::Path,
+        server: &MockServer,
+    ) -> Installer {
+        fs::create_dir_all(root.join("db")).unwrap();
+
+        let api_client = ApiClient::with_base_url(format!("{}/formula", server.uri()))
+            .unwrap()
+            .with_tap_raw_base_url(server.uri());
+        let blob_cache = BlobCache::new(&root.join("cache")).unwrap();
+        let store = Store::new(root).unwrap();
+        let cellar = Cellar::new(&root).unwrap();
+        let linker = Linker::new(prefix).unwrap();
+        let db = Database::open(&root.join("db/zb.sqlite3")).unwrap();
+
+        Installer::new(
+            api_client,
+            blob_cache,
+            store,
+            cellar,
+            linker,
+            db,
+            prefix.to_path_buf(),
+            root.join("locks"),
+        )
+    }
+
+    #[tokio::test]
+    async fn upgrade_supports_explicit_tap_formula_references() {
+        let first_server = MockServer::start().await;
+        let second_server = MockServer::start().await;
+        let tmp = TempDir::new().unwrap();
+
+        let first_bottle = create_bottle_tarball("terraform", "1.10.0");
+        let first_sha = sha256_hex(&first_bottle);
+        let second_bottle = create_bottle_tarball("terraform", "1.11.0");
+        let second_sha = sha256_hex(&second_bottle);
+
+        Mock::given(method("GET"))
+            .and(path("/hashicorp/homebrew-tap/main/Formula/terraform.rb"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(tap_formula_rb(
+                &first_server.uri(),
+                "1.10.0",
+                &first_sha,
+            )))
+            .mount(&first_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/v2/hashicorp/tap/terraform/blobs/sha256:{first_sha}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(first_bottle))
+            .mount(&first_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/hashicorp/homebrew-tap/main/Formula/terraform.rb"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(tap_formula_rb(
+                &second_server.uri(),
+                "1.11.0",
+                &second_sha,
+            )))
+            .mount(&second_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/v2/hashicorp/tap/terraform/blobs/sha256:{second_sha}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(second_bottle))
+            .mount(&second_server)
+            .await;
+
+        let root = tmp.path().join("zerobrew");
+        let prefix = tmp.path().join("homebrew");
+
+        let mut installer = make_installer(&root, &prefix, &first_server);
+        installer
+            .install(&["hashicorp/tap/terraform".to_string()], true)
+            .await
+            .unwrap();
+
+        let mut installer = make_installer(&root, &prefix, &second_server);
+        let mut ui = Ui::new();
+        execute(
+            &mut installer,
+            vec!["hashicorp/tap/terraform".to_string()],
+            false,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+
+        let installed = installer.get_installed("hashicorp/tap/terraform").unwrap();
+        assert_eq!(installed.name, "hashicorp/tap/terraform");
+        assert_eq!(installed.version, "1.11.0");
+    }
+}

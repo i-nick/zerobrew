@@ -55,10 +55,7 @@ impl fmt::Display for Error {
             Error::NetworkFailure { message } => write!(f, "network failure: {message}"),
             Error::MissingFormula { name } => write!(f, "missing formula '{name}'"),
             Error::UnsupportedTap { name } => {
-                write!(
-                    f,
-                    "tap formula '{name}' is not supported (only homebrew/core)"
-                )
+                write!(f, "tap formula '{name}' is not supported in this context")
             }
             Error::UnsupportedFormula { name, reason } => {
                 write!(f, "formula '{name}' is not supported: {reason}")

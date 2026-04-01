@@ -418,10 +418,14 @@ mod test_support {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::Write;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use tar::Builder;
     use tempfile::TempDir;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -434,6 +438,42 @@ mod tests {
     use crate::{Installer, Linker};
 
     use super::test_support::*;
+
+    fn create_versioned_bottle_tarball(
+        formula_name: &str,
+        version: &str,
+        extra_entries: &[(&str, &[u8], u32)],
+    ) -> Vec<u8> {
+        let mut builder = Builder::new(Vec::new());
+
+        let mut append = |path: String, contents: &[u8], mode: u32| {
+            let mut header = tar::Header::new_gnu();
+            header.set_path(path).unwrap();
+            header.set_size(contents.len() as u64);
+            header.set_mode(mode);
+            header.set_cksum();
+            builder.append(&header, contents).unwrap();
+        };
+
+        append(
+            format!("{formula_name}/{version}/bin/{formula_name}"),
+            format!("#!/bin/sh\necho {formula_name} {version}").as_bytes(),
+            0o755,
+        );
+
+        for (relative_path, contents, mode) in extra_entries {
+            append(
+                format!("{formula_name}/{version}/{relative_path}"),
+                contents,
+                *mode,
+            );
+        }
+
+        let tar_data = builder.into_inner().unwrap();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&tar_data).unwrap();
+        encoder.finish().unwrap()
+    }
 
     #[tokio::test]
     async fn install_completes_successfully() {
@@ -515,6 +555,196 @@ mod tests {
         let installed = installer.db.get_installed("testpkg");
         assert!(installed.is_some());
         assert_eq!(installed.unwrap().version, "1.0.0");
+    }
+
+    #[tokio::test]
+    async fn reinstalling_new_formula_version_replaces_its_own_links() {
+        let first_server = MockServer::start().await;
+        let second_server = MockServer::start().await;
+        let tmp = TempDir::new().unwrap();
+
+        let first_bottle = create_versioned_bottle_tarball(
+            "deno",
+            "2.7.10",
+            &[
+                ("bin/dx", b"#!/bin/sh\necho dx 2.7.10", 0o755),
+                (
+                    "share/zsh/site-functions/_deno",
+                    b"#compdef deno\n# 2.7.10",
+                    0o644,
+                ),
+                (
+                    "share/fish/vendor_completions.d/deno.fish",
+                    b"# fish completion 2.7.10",
+                    0o644,
+                ),
+                (
+                    "etc/bash_completion.d/deno",
+                    b"# bash completion 2.7.10",
+                    0o644,
+                ),
+            ],
+        );
+        let first_sha = sha256_hex(&first_bottle);
+
+        let second_bottle = create_versioned_bottle_tarball(
+            "deno",
+            "2.7.11",
+            &[
+                ("bin/dx", b"#!/bin/sh\necho dx 2.7.11", 0o755),
+                (
+                    "share/zsh/site-functions/_deno",
+                    b"#compdef deno\n# 2.7.11",
+                    0o644,
+                ),
+                (
+                    "share/fish/vendor_completions.d/deno.fish",
+                    b"# fish completion 2.7.11",
+                    0o644,
+                ),
+                (
+                    "etc/bash_completion.d/deno",
+                    b"# bash completion 2.7.11",
+                    0o644,
+                ),
+            ],
+        );
+        let second_sha = sha256_hex(&second_bottle);
+
+        let tag = get_test_bottle_tag();
+        let first_formula_json = format!(
+            r#"{{
+                "name": "deno",
+                "versions": {{ "stable": "2.7.10" }},
+                "dependencies": [],
+                "bottle": {{
+                    "stable": {{
+                        "files": {{
+                            "{}": {{
+                                "url": "{}/bottles/deno-2.7.10.{}.bottle.tar.gz",
+                                "sha256": "{}"
+                            }}
+                        }}
+                    }}
+                }}
+            }}"#,
+            tag,
+            first_server.uri(),
+            tag,
+            first_sha
+        );
+        let second_formula_json = format!(
+            r#"{{
+                "name": "deno",
+                "versions": {{ "stable": "2.7.11" }},
+                "dependencies": [],
+                "bottle": {{
+                    "stable": {{
+                        "files": {{
+                            "{}": {{
+                                "url": "{}/bottles/deno-2.7.11.{}.bottle.tar.gz",
+                                "sha256": "{}"
+                            }}
+                        }}
+                    }}
+                }}
+            }}"#,
+            tag,
+            second_server.uri(),
+            tag,
+            second_sha
+        );
+
+        Mock::given(method("GET"))
+            .and(path("/formula/deno.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(&first_formula_json))
+            .mount(&first_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/bottles/deno-2.7.10.{}.bottle.tar.gz", tag)))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(first_bottle))
+            .mount(&first_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/formula/deno.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(&second_formula_json))
+            .mount(&second_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/bottles/deno-2.7.11.{}.bottle.tar.gz", tag)))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(second_bottle))
+            .mount(&second_server)
+            .await;
+
+        let root = tmp.path().join("zerobrew");
+        let prefix = tmp.path().join("homebrew");
+        fs::create_dir_all(root.join("db")).unwrap();
+
+        let blob_cache = BlobCache::new(&root.join("cache")).unwrap();
+        let store = Store::new(&root).unwrap();
+        let cellar = Cellar::new_at(prefix.join("Cellar")).unwrap();
+        let linker = Linker::new(&prefix).unwrap();
+        let db = Database::open(&root.join("db/zb.sqlite3")).unwrap();
+
+        let api_client =
+            ApiClient::with_base_url(format!("{}/formula", first_server.uri())).unwrap();
+        let mut installer = Installer::new(
+            api_client,
+            blob_cache,
+            store,
+            cellar,
+            linker,
+            db,
+            prefix.clone(),
+            root.join("locks"),
+        );
+
+        installer
+            .install(&["deno".to_string()], true)
+            .await
+            .unwrap();
+
+        let api_client =
+            ApiClient::with_base_url(format!("{}/formula", second_server.uri())).unwrap();
+        let blob_cache = BlobCache::new(&root.join("cache")).unwrap();
+        let store = Store::new(&root).unwrap();
+        let cellar = Cellar::new_at(prefix.join("Cellar")).unwrap();
+        let linker = Linker::new(&prefix).unwrap();
+        let db = Database::open(&root.join("db/zb.sqlite3")).unwrap();
+
+        let mut installer = Installer::new(
+            api_client,
+            blob_cache,
+            store,
+            cellar,
+            linker,
+            db,
+            prefix.clone(),
+            root.join("locks"),
+        );
+
+        installer
+            .install(&["deno".to_string()], true)
+            .await
+            .unwrap();
+
+        let new_keg = prefix.join("Cellar/deno/2.7.11");
+        for path in [
+            prefix.join("bin/deno"),
+            prefix.join("bin/dx"),
+            prefix.join("share/zsh/site-functions/_deno"),
+            prefix.join("share/fish/vendor_completions.d/deno.fish"),
+            prefix.join("etc/bash_completion.d/deno"),
+        ] {
+            assert_eq!(
+                fs::canonicalize(&path).unwrap(),
+                fs::canonicalize(new_keg.join(path.strip_prefix(&prefix).unwrap())).unwrap()
+            );
+        }
+
+        let installed = installer.db.get_installed("deno").unwrap();
+        assert_eq!(installed.version, "2.7.11");
     }
 
     #[tokio::test]

@@ -245,6 +245,21 @@ mod tests {
         )
     }
 
+    fn tap_formula_rb(mock_server_uri: &str, version: &str, sha256: &str) -> String {
+        let tag = get_test_bottle_tag();
+        format!(
+            r#"
+class Terraform < Formula
+  version "{version}"
+  bottle do
+    root_url "{mock_server_uri}/v2/hashicorp/tap"
+    sha256 {tag}: "{sha256}"
+  end
+end
+"#
+        )
+    }
+
     async fn test_installer() -> (Installer, MockServer, TempDir) {
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
@@ -366,6 +381,64 @@ mod tests {
         assert_eq!(result.installed_version, "1.7.0");
         assert_eq!(result.current_version, "1.7.1");
         assert!(!result.is_source_build);
+    }
+
+    #[tokio::test]
+    async fn is_outdated_supports_explicit_tap_formula_references() {
+        let mock_server = MockServer::start().await;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("zerobrew");
+        let prefix = tmp.path().join("homebrew");
+        fs::create_dir_all(root.join("db")).unwrap();
+
+        let api_client = ApiClient::with_base_url(format!("{}/formula", mock_server.uri()))
+            .unwrap()
+            .with_tap_raw_base_url(mock_server.uri())
+            .with_cask_base_url(format!("{}/cask", mock_server.uri()));
+        let blob_cache = BlobCache::new(&root.join("cache")).unwrap();
+        let store = Store::new(&root).unwrap();
+        let cellar = Cellar::new(&root).unwrap();
+        let linker = Linker::new(&prefix).unwrap();
+        let db = Database::open(&root.join("db/zb.sqlite3")).unwrap();
+
+        let mut installer = Installer::new(
+            api_client,
+            blob_cache,
+            store,
+            cellar,
+            linker,
+            db,
+            prefix,
+            root.join("locks"),
+        );
+
+        {
+            let tx = installer.db.transaction().unwrap();
+            tx.record_install("hashicorp/tap/terraform", "1.10.0", "old_sha256")
+                .unwrap();
+            tx.commit().unwrap();
+        }
+
+        let new_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        Mock::given(method("GET"))
+            .and(path("/hashicorp/homebrew-tap/main/Formula/terraform.rb"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(tap_formula_rb(
+                &mock_server.uri(),
+                "1.11.0",
+                new_sha,
+            )))
+            .mount(&mock_server)
+            .await;
+
+        let result = installer
+            .is_outdated("hashicorp/tap/terraform")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.name, "hashicorp/tap/terraform");
+        assert_eq!(result.installed_version, "1.10.0");
+        assert_eq!(result.current_version, "1.11.0");
     }
 
     #[tokio::test]

@@ -34,6 +34,7 @@ After install, run the `export` command it prints (or restart your terminal).
 ```bash
 zb install jq                   # install one package
 zb install wget git             # install multiple
+zb install hashicorp/tap/terraform  # install a third-party formula by explicit ref
 zb bundle                       # install from Brewfile
 zb bundle install -f myfile     # install from custom file
 zb bundle dump                  # export installed packages to Brewfile
@@ -69,6 +70,10 @@ Our innovations focus on:
 - Content-addressable storage for deduplication
 - APFS clonefiles for zero-overhead copying
 - Source build fallback using Homebrew's Ruby DSL
+
+For third-party Homebrew taps, zerobrew does not maintain a separate tap registry. Install those
+formulas with explicit references such as `owner/repo/formula`, and use the same explicit ref in
+your Brewfiles.
 
 zerobrew is experimental. We recommend running it alongside Homebrew rather than as a replacement, and do _not_ 
 recommend purging homebrew and replacing it with zerobrew unless you are absolutely sure about the implications of 

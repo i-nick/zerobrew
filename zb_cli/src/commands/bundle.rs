@@ -99,6 +99,10 @@ fn load_manifest(path: &Path) -> Result<Vec<String>, zb_core::Error> {
             continue;
         }
 
+        if let Some(tap) = parse_quoted_directive(entry, "tap") {
+            return Err(unsupported_tap_directive_error(path, tap));
+        }
+
         if let Some(parsed) = parse_brewfile_entry(entry)
             && seen.insert(parsed.clone())
         {
@@ -115,11 +119,17 @@ fn load_manifest(path: &Path) -> Result<Vec<String>, zb_core::Error> {
     Ok(formulas)
 }
 
-fn parse_brewfile_entry(line: &str) -> Option<String> {
-    if line.starts_with("tap ") {
-        return None;
+fn unsupported_tap_directive_error(path: &Path, tap: &str) -> zb_core::Error {
+    zb_core::Error::FileError {
+        message: format!(
+            "manifest {} uses unsupported tap directive '{}'. zerobrew does not support Brewfile tap directives; replace tapped formulas with explicit refs like brew \"owner/repo/foo\"",
+            path.display(),
+            tap
+        ),
     }
+}
 
+fn parse_brewfile_entry(line: &str) -> Option<String> {
     if let Some(token) = parse_quoted_directive(line, "cask") {
         return Some(format!("cask:{token}"));
     }
@@ -150,7 +160,67 @@ fn parse_quoted_directive<'a>(line: &'a str, directive: &str) -> Option<&'a str>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::fs;
     use std::io::Write;
+    use tar::Builder;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use zb_io::network::api::ApiClient;
+    use zb_io::{BlobCache, Cellar, Database, Installer, Linker, Store};
+
+    fn create_bottle_tarball(formula_name: &str) -> Vec<u8> {
+        let mut builder = Builder::new(Vec::new());
+
+        let mut header = tar::Header::new_gnu();
+        header
+            .set_path(format!("{formula_name}/1.0.0/bin/{formula_name}"))
+            .unwrap();
+        header.set_size(20);
+        header.set_mode(0o755);
+        header.set_cksum();
+
+        let content = format!("#!/bin/sh\necho {formula_name}");
+        builder.append(&header, content.as_bytes()).unwrap();
+
+        let tar_data = builder.into_inner().unwrap();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&tar_data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn sha256_hex(data: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        format!("{:x}", hasher.finalize())
+    }
+
+    fn get_test_bottle_tag() -> &'static str {
+        if cfg!(target_os = "linux") {
+            "x86_64_linux"
+        } else if cfg!(target_arch = "x86_64") {
+            "sonoma"
+        } else {
+            "arm64_sonoma"
+        }
+    }
+
+    fn tap_formula_rb(mock_server_uri: &str, version: &str, sha256: &str) -> String {
+        let tag = get_test_bottle_tag();
+        format!(
+            r#"
+class Terraform < Formula
+  version "{version}"
+  bottle do
+    root_url "{mock_server_uri}/v2/hashicorp/tap"
+    sha256 {tag}: "{sha256}"
+  end
+end
+"#
+        )
+    }
 
     #[test]
     fn load_manifest_parses_entries_ignoring_whitespace_and_comments() {
@@ -209,14 +279,96 @@ mod tests {
     #[test]
     fn load_manifest_parses_brewfile_cask_and_brew_entries() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        writeln!(
-            file,
-            "tap \"homebrew/cask\"\nbrew \"wget\"\ncask \"docker-desktop\"\n"
-        )
-        .unwrap();
+        writeln!(file, "brew \"wget\"\ncask \"docker-desktop\"\n").unwrap();
 
         let entries = load_manifest(file.path()).unwrap();
         assert_eq!(entries, vec!["wget", "cask:docker-desktop"]);
+    }
+
+    #[test]
+    fn load_manifest_accepts_explicit_tap_formula_references() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "brew \"hashicorp/tap/terraform\"\n").unwrap();
+
+        let entries = load_manifest(file.path()).unwrap();
+        assert_eq!(entries, vec!["hashicorp/tap/terraform"]);
+    }
+
+    #[test]
+    fn load_manifest_errors_on_tap_directive() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "tap \"hashicorp/tap\"\nbrew \"terraform\"\n").unwrap();
+
+        let err = load_manifest(file.path()).unwrap_err();
+        match err {
+            zb_core::Error::FileError { message } => {
+                assert!(message.contains("unsupported tap directive"));
+                assert!(message.contains("hashicorp/tap"));
+                assert!(message.contains("brew \"owner/repo/foo\""));
+            }
+            other => panic!("expected file error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn dump_to_file_preserves_full_tap_formula_names() {
+        let mock_server = MockServer::start().await;
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let bottle = create_bottle_tarball("terraform");
+        let sha = sha256_hex(&bottle);
+
+        Mock::given(method("GET"))
+            .and(path("/hashicorp/homebrew-tap/main/Formula/terraform.rb"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(tap_formula_rb(
+                &mock_server.uri(),
+                "1.10.0",
+                &sha,
+            )))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/v2/hashicorp/tap/terraform/blobs/sha256:{sha}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(bottle))
+            .mount(&mock_server)
+            .await;
+
+        let root = tmp.path().join("zerobrew");
+        let prefix = tmp.path().join("homebrew");
+        fs::create_dir_all(root.join("db")).unwrap();
+
+        let api_client = ApiClient::with_base_url(format!("{}/formula", mock_server.uri()))
+            .unwrap()
+            .with_tap_raw_base_url(mock_server.uri());
+        let blob_cache = BlobCache::new(&root.join("cache")).unwrap();
+        let store = Store::new(&root).unwrap();
+        let cellar = Cellar::new(&root).unwrap();
+        let linker = Linker::new(&prefix).unwrap();
+        let db = Database::open(&root.join("db/zb.sqlite3")).unwrap();
+
+        let mut installer = Installer::new(
+            api_client,
+            blob_cache,
+            store,
+            cellar,
+            linker,
+            db,
+            prefix,
+            root.join("locks"),
+        );
+
+        installer
+            .install(&["hashicorp/tap/terraform".to_string()], true)
+            .await
+            .unwrap();
+
+        let dump_path = tmp.path().join("Brewfile");
+        dump_to_file(&mut installer, &dump_path, true).unwrap();
+
+        let content = fs::read_to_string(dump_path).unwrap();
+        assert!(content.contains("brew \"hashicorp/tap/terraform\""));
     }
 
     #[test]
@@ -234,10 +386,5 @@ mod tests {
             parse_brewfile_entry("cask \"docker\""),
             Some("cask:docker".to_string())
         );
-    }
-
-    #[test]
-    fn parse_brewfile_entry_skips_tap_directive() {
-        assert_eq!(parse_brewfile_entry("tap \"homebrew/core\""), None);
     }
 }

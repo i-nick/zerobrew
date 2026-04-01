@@ -14,16 +14,7 @@ pub async fn execute(
     }
 
     if json {
-        let json_output: Vec<serde_json::Value> = outdated
-            .iter()
-            .map(|pkg| {
-                serde_json::json!({
-                    "name": pkg.name,
-                    "installed_versions": [pkg.installed_version],
-                    "current_version": pkg.current_version,
-                })
-            })
-            .collect();
+        let json_output = build_json_output(&outdated);
         println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
         return Ok(());
     }
@@ -39,23 +30,68 @@ pub async fn execute(
     }
 
     for pkg in &outdated {
-        if quiet {
-            println!("{}", pkg.name);
-        } else if verbose {
-            println!(
-                "{} {} {} {}",
-                pkg.name,
-                style(&pkg.installed_version).red(),
-                style("→").dim(),
-                style(&pkg.current_version).green(),
-            );
-        } else {
-            println!(
-                "{} ({}) < {}",
-                pkg.name, pkg.installed_version, pkg.current_version
-            );
-        }
+        println!("{}", format_outdated_line(pkg, quiet, verbose));
     }
 
     Ok(())
+}
+
+fn build_json_output(outdated: &[zb_io::OutdatedPackage]) -> Vec<serde_json::Value> {
+    outdated
+        .iter()
+        .map(|pkg| {
+            serde_json::json!({
+                "name": pkg.name,
+                "installed_versions": [pkg.installed_version],
+                "current_version": pkg.current_version,
+            })
+        })
+        .collect()
+}
+
+fn format_outdated_line(pkg: &zb_io::OutdatedPackage, quiet: bool, verbose: bool) -> String {
+    if quiet {
+        pkg.name.clone()
+    } else if verbose {
+        format!(
+            "{} {} {} {}",
+            pkg.name,
+            style(&pkg.installed_version).red(),
+            style("→").dim(),
+            style(&pkg.current_version).green(),
+        )
+    } else {
+        format!(
+            "{} ({}) < {}",
+            pkg.name, pkg.installed_version, pkg.current_version
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_json_output, format_outdated_line};
+
+    fn tap_pkg() -> zb_io::OutdatedPackage {
+        zb_io::OutdatedPackage {
+            name: "hashicorp/tap/terraform".to_string(),
+            installed_version: "1.10.0".to_string(),
+            current_version: "1.11.0".to_string(),
+            installed_sha256: "old".to_string(),
+            current_sha256: "new".to_string(),
+            is_source_build: false,
+        }
+    }
+
+    #[test]
+    fn format_outdated_line_preserves_full_tap_name() {
+        let rendered = format_outdated_line(&tap_pkg(), false, false);
+        assert!(rendered.starts_with("hashicorp/tap/terraform"));
+    }
+
+    #[test]
+    fn build_json_output_preserves_full_tap_name() {
+        let json = build_json_output(&[tap_pkg()]);
+        assert_eq!(json[0]["name"], "hashicorp/tap/terraform");
+    }
 }

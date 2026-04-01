@@ -54,6 +54,27 @@ fn keg_name_from_symlink(dst: &Path) -> Option<String> {
     keg_name_from_path(&canonical)
 }
 
+fn resolve_link_target(dst: &Path, target: PathBuf) -> PathBuf {
+    if target.is_relative() {
+        dst.parent().unwrap_or(Path::new("")).join(target)
+    } else {
+        target
+    }
+}
+
+fn canonical_or_original(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn owned_by_same_keg_name(a: &Path, b: &Path) -> bool {
+    let a = canonical_or_original(a);
+    let b = canonical_or_original(b);
+    matches!(
+        (keg_name_from_path(&a), keg_name_from_path(&b)),
+        (Some(owner_a), Some(owner_b)) if owner_a == owner_b
+    )
+}
+
 impl Linker {
     pub fn new(prefix: &Path) -> io::Result<Self> {
         let bin_dir = prefix.join("bin");
@@ -129,12 +150,10 @@ impl Linker {
 
             if dst_path.symlink_metadata().is_ok() {
                 if let Ok(target) = fs::read_link(&dst_path) {
-                    let resolved = if target.is_relative() {
-                        dst_path.parent().unwrap_or(Path::new("")).join(&target)
-                    } else {
-                        target
-                    };
-                    if fs::canonicalize(&resolved).ok() == fs::canonicalize(&src_path).ok() {
+                    let resolved = resolve_link_target(&dst_path, target);
+                    if canonical_or_original(&resolved) == canonical_or_original(&src_path)
+                        || owned_by_same_keg_name(&resolved, &src_path)
+                    {
                         continue;
                     }
                 }
@@ -179,7 +198,8 @@ impl Linker {
             }
 
             if matching_old.exists()
-                && fs::canonicalize(&matching_old).ok() != fs::canonicalize(&src_path).ok()
+                && canonical_or_original(&matching_old) != canonical_or_original(&src_path)
+                && !owned_by_same_keg_name(&matching_old, &src_path)
             {
                 conflicts.push(ConflictedLink {
                     path: dst_path,
@@ -226,8 +246,11 @@ impl Linker {
                 if dst_path.symlink_metadata().is_ok() && dst_path.is_symlink() {
                     let old_target = fs::read_link(&dst_path)
                         .map_err(Error::store("failed to read symlink target"))?;
+                    let resolved = resolve_link_target(&dst_path, old_target);
                     let _ = fs::remove_file(&dst_path);
-                    Self::link_recursive(&old_target, &dst_path)?;
+                    if !owned_by_same_keg_name(&resolved, &src_path) {
+                        Self::link_recursive(&resolved, &dst_path)?;
+                    }
                 }
                 linked.extend(Self::link_recursive(&src_path, &dst_path)?);
                 continue;
@@ -235,12 +258,8 @@ impl Linker {
 
             if dst_path.symlink_metadata().is_ok() {
                 if let Ok(target) = fs::read_link(&dst_path) {
-                    let resolved = if target.is_relative() {
-                        dst_path.parent().unwrap_or(Path::new("")).join(&target)
-                    } else {
-                        target
-                    };
-                    if fs::canonicalize(&resolved).ok() == fs::canonicalize(&src_path).ok() {
+                    let resolved = resolve_link_target(&dst_path, target);
+                    if canonical_or_original(&resolved) == canonical_or_original(&src_path) {
                         if resolved.exists() {
                             linked.push(LinkedFile {
                                 link_path: dst_path,
@@ -250,6 +269,8 @@ impl Linker {
                         } else {
                             let _ = fs::remove_file(&dst_path);
                         }
+                    } else if owned_by_same_keg_name(&resolved, &src_path) {
+                        let _ = fs::remove_file(&dst_path);
                     } else {
                         return Err(Error::LinkConflict {
                             conflicts: vec![ConflictedLink {
@@ -467,6 +488,32 @@ mod tests {
         keg_path
     }
 
+    fn setup_versioned_keg(prefix: &Path, name: &str, version: &str) -> PathBuf {
+        let keg_path = prefix.join("Cellar").join(name).join(version);
+
+        let bin_dir = keg_path.join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        for binary in [name, "dx"] {
+            let path = bin_dir.join(binary);
+            fs::write(&path, format!("#!/bin/sh\necho {name} {version}")).unwrap();
+            fs::set_permissions(&path, PermissionsExt::from_mode(0o755)).unwrap();
+        }
+
+        let zsh_completion = keg_path.join("share/zsh/site-functions/_deno");
+        fs::create_dir_all(zsh_completion.parent().unwrap()).unwrap();
+        fs::write(&zsh_completion, format!("#compdef deno\n# {version}")).unwrap();
+
+        let fish_completion = keg_path.join("share/fish/vendor_completions.d/deno.fish");
+        fs::create_dir_all(fish_completion.parent().unwrap()).unwrap();
+        fs::write(&fish_completion, format!("# fish completion {version}")).unwrap();
+
+        let bash_completion = keg_path.join("etc/bash_completion.d/deno");
+        fs::create_dir_all(bash_completion.parent().unwrap()).unwrap();
+        fs::write(&bash_completion, format!("# bash completion {version}")).unwrap();
+
+        keg_path
+    }
+
     #[test]
     fn links_executables_to_bin() {
         let tmp = TempDir::new().unwrap();
@@ -636,6 +683,50 @@ mod tests {
         assert!(!prefix.join("bin/beta-only").exists());
         // The opt link should also not exist
         assert!(!prefix.join("opt/beta").exists());
+    }
+
+    #[test]
+    fn check_conflicts_allows_replacing_links_owned_by_same_formula() {
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path();
+        let linker = Linker::new(prefix).unwrap();
+
+        let old_keg = setup_versioned_keg(prefix, "deno", "2.7.10");
+        let new_keg = setup_versioned_keg(prefix, "deno", "2.7.11");
+
+        linker.link_keg(&old_keg).unwrap();
+        assert!(linker.check_conflicts(&new_keg).is_ok());
+    }
+
+    #[test]
+    fn link_keg_replaces_existing_links_owned_by_same_formula() {
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path();
+        let linker = Linker::new(prefix).unwrap();
+
+        let old_keg = setup_versioned_keg(prefix, "deno", "2.7.10");
+        let new_keg = setup_versioned_keg(prefix, "deno", "2.7.11");
+
+        linker.link_keg(&old_keg).unwrap();
+        linker.link_keg(&new_keg).unwrap();
+
+        for path in [
+            prefix.join("bin/deno"),
+            prefix.join("bin/dx"),
+            prefix.join("share/zsh/site-functions/_deno"),
+            prefix.join("share/fish/vendor_completions.d/deno.fish"),
+            prefix.join("etc/bash_completion.d/deno"),
+        ] {
+            assert_eq!(
+                fs::canonicalize(&path).unwrap(),
+                fs::canonicalize(new_keg.join(path.strip_prefix(prefix).unwrap())).unwrap()
+            );
+        }
+
+        assert_eq!(
+            fs::canonicalize(prefix.join("opt/deno")).unwrap(),
+            fs::canonicalize(&new_keg).unwrap()
+        );
     }
 
     #[test]

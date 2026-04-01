@@ -286,13 +286,11 @@ impl ApiClient {
         }
     }
 
-    #[cfg(test)]
     pub fn with_tap_raw_base_url(mut self, tap_raw_base_url: String) -> Self {
         self.tap_raw_base_url = tap_raw_base_url;
         self
     }
 
-    #[cfg(test)]
     pub fn with_cask_base_url(mut self, cask_base_url: String) -> Self {
         self.cask_base_url = cask_base_url;
         self

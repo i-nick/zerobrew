@@ -32,7 +32,9 @@ pub async fn execute(
     ui.blank_line().map_err(ui_error)?;
 
     if !packages.non_core_formulas.is_empty() {
-        ui.note("Formulas from non-core taps cannot be migrated to zerobrew:")
+        ui.note(
+            "Formulas from non-core Homebrew taps are not migrated automatically. Install them in zerobrew with explicit refs like owner/repo/formula:",
+        )
             .map_err(ui_error)?;
         for pkg in &packages.non_core_formulas {
             ui.bullet(format!("{} ({})", pkg.name, pkg.tap))
