@@ -1,0 +1,31 @@
+[package]
+name = "zb_cli"
+version = "0.2.1"
+edition = "2024"
+rust-version.workspace = true
+
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+clap_complete = { workspace = true, features = ["unstable-dynamic"] }
+tokio = { workspace = true, features = ["full"] }
+indicatif.workspace = true
+console.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+zb_core = { path = "../zb_core" }
+zb_io = { path = "../zb_io" }
+chrono = "0.4.43"
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock.workspace = true
+tar.workspace = true
+flate2.workspace = true
+sha2.workspace = true
+walkdir.workspace = true

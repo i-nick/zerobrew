@@ -1,0 +1,119 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (must be an existing tag, e.g. v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: Build ${{ matrix.artifact_name }}
+    runs-on: ${{ matrix.os }}
+    if: github.repository == 'i-nick/zerobrew' && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v')))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact_name: zb-darwin-arm64
+            zbx_artifact_name: zbx-darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        env:
+          LZMA_API_STATIC: "1"
+        run: cargo build --release --locked --target ${{ matrix.target }} --package zb_cli
+
+      - name: Verify no dynamic liblzma dependency (macOS)
+        if: contains(matrix.target, 'apple-darwin')
+        run: |
+          otool -L target/${{ matrix.target }}/release/zb
+          if otool -L target/${{ matrix.target }}/release/zb | grep -Eq '/opt/homebrew|/usr/local/opt|liblzma'; then
+            echo "error: unexpected dynamic dependency detected in release binary"
+            exit 1
+          fi
+
+      - name: Prepare binaries
+        run: |
+          cp target/${{ matrix.target }}/release/zb ${{ matrix.artifact_name }}
+          cp target/${{ matrix.target }}/release/zbx ${{ matrix.zbx_artifact_name }}
+
+      - name: Upload zb binary as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+          retention-days: 7
+
+      - name: Upload zbx binary as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.zbx_artifact_name }}
+          path: ${{ matrix.zbx_artifact_name }}
+          retention-days: 7
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v'))
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: "zb*-*"
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd assets
+          sha256sum -- * > SHA256SUMS
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v3.2.0
+        with:
+          subject-checksums: assets/SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          files: assets/*
+          generate_release_notes: true
+          draft: false
