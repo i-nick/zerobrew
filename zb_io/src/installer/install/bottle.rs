@@ -144,6 +144,11 @@ impl Installer {
             match self.store.ensure_entry(&bottle.sha256, &blob_path) {
                 Ok(entry) => return Ok(entry),
                 Err(Error::StoreCorruption { message }) => {
+                    if is_archive_policy_rejection(&message) {
+                        last_error = Some(Error::StoreCorruption { message });
+                        break;
+                    }
+
                     self.downloader.remove_blob(&bottle.sha256);
 
                     if attempt + 1 < MAX_CORRUPTION_RETRIES {
@@ -478,6 +483,19 @@ impl Installer {
 
         Ok(())
     }
+}
+
+fn is_archive_policy_rejection(message: &str) -> bool {
+    [
+        "absolute link target in archive entry",
+        "absolute path in archive",
+        "link target escapes destination directory",
+        "path escapes destination directory",
+        "path traversal in archive",
+        "zip entry with invalid path",
+    ]
+    .iter()
+    .any(|needle| message.contains(needle))
 }
 
 fn should_mount_dmg_directly(cask: &crate::installer::cask::ResolvedCask) -> bool {
@@ -1110,6 +1128,31 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     static HOME_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    #[test]
+    fn archive_policy_rejections_are_not_retryable() {
+        for message in [
+            "absolute link target in archive entry foo -> /bar",
+            "absolute path in archive: /bar",
+            "link target escapes destination directory: foo -> ../bar",
+            "path escapes destination directory: foo",
+            "path traversal in archive: ../bar",
+            "zip entry with invalid path",
+        ] {
+            assert!(is_archive_policy_rejection(message), "{message}");
+        }
+    }
+
+    #[test]
+    fn extraction_io_errors_remain_retryable() {
+        for message in [
+            "failed to unpack entry foo: unexpected EOF",
+            "failed to read archive entries: invalid gzip header",
+            "failed to create zstd decoder: corrupt frame",
+        ] {
+            assert!(!is_archive_policy_rejection(message), "{message}");
+        }
+    }
 
     #[cfg(target_os = "macos")]
     struct HomeOverride {

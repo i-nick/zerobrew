@@ -137,7 +137,14 @@ fn validate_tar_link_target<R: Read>(
         return Ok(());
     };
 
-    validate_symlink_target(entry_path, &target, dest_dir)
+    // Homebrew bottles can contain relative symlinks that climb from a keg
+    // into the eventual prefix, e.g. Cellar/foo/... -> ../../../../../opt/bar.
+    // Preserve those links; only hard links need destination containment here.
+    if entry_type.is_symlink() {
+        validate_symlink_target(entry_path, &target)
+    } else {
+        validate_link_target_within_destination(entry_path, &target, dest_dir)
+    }
 }
 
 fn extract_zip_archive(path: &Path, dest_dir: &Path) -> Result<(), Error> {
@@ -215,14 +222,14 @@ fn extract_zip_symlink<R: Read>(
         .map_err(Error::store("failed to read zip symlink target"))?;
     let target = PathBuf::from(OsString::from_vec(target_bytes));
 
-    validate_symlink_target(raw_path, &target, dest_dir)?;
+    validate_link_target_within_destination(raw_path, &target, dest_dir)?;
 
     std::os::unix::fs::symlink(&target, out_path)
         .map_err(Error::store("failed to create extracted symlink"))?;
     Ok(())
 }
 
-fn validate_symlink_target(raw_path: &Path, target: &Path, dest_dir: &Path) -> Result<(), Error> {
+fn validate_symlink_target(raw_path: &Path, target: &Path) -> Result<(), Error> {
     if target.is_absolute() {
         return Err(Error::StoreCorruption {
             message: format!(
@@ -232,6 +239,16 @@ fn validate_symlink_target(raw_path: &Path, target: &Path, dest_dir: &Path) -> R
             ),
         });
     }
+
+    Ok(())
+}
+
+fn validate_link_target_within_destination(
+    raw_path: &Path,
+    target: &Path,
+    dest_dir: &Path,
+) -> Result<(), Error> {
+    validate_symlink_target(raw_path, target)?;
 
     let link_parent = raw_path.parent().unwrap_or_else(|| Path::new(""));
     let normalized_target = normalize_path(&dest_dir.join(link_parent).join(target));
@@ -410,6 +427,25 @@ mod tests {
         encoder.finish().unwrap()
     }
 
+    fn create_tarball_with_hard_link(name: &str, target: &str) -> Vec<u8> {
+        let mut builder = Builder::new(Vec::new());
+
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Link);
+        header.set_path(name).unwrap();
+        header.set_size(0);
+        header.set_mode(0o644);
+        header.set_cksum();
+
+        builder.append_link(&mut header, name, target).unwrap();
+
+        let tar_data = builder.into_inner().unwrap();
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&tar_data).unwrap();
+        encoder.finish().unwrap()
+    }
+
     fn create_test_zip(entries: Vec<(&str, &[u8])>) -> Vec<u8> {
         use zip::write::SimpleFileOptions;
 
@@ -526,6 +562,49 @@ mod tests {
         assert_eq!(
             fs::read_link(&link_path).unwrap(),
             PathBuf::from("target.txt")
+        );
+    }
+
+    #[test]
+    fn preserves_tar_symlink_that_escapes_destination() {
+        let tmp = TempDir::new().unwrap();
+        let target = "../../../../../opt/python@3.14/bin/python3.14";
+        let tarball = create_tarball_with_symlink("hf/1.12.0/libexec/bin/python3.14", target);
+
+        let tarball_path = tmp.path().join("test.tar.gz");
+        fs::write(&tarball_path, &tarball).unwrap();
+
+        let dest = tmp.path().join("extracted");
+        fs::create_dir(&dest).unwrap();
+
+        extract_tarball(&tarball_path, &dest).unwrap();
+
+        let link_path = dest.join("hf/1.12.0/libexec/bin/python3.14");
+        assert!(
+            link_path
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read_link(&link_path).unwrap(), PathBuf::from(target));
+    }
+
+    #[test]
+    fn rejects_tar_hard_link_that_escapes_destination() {
+        let tmp = TempDir::new().unwrap();
+        let tarball = create_tarball_with_hard_link("link", "../outside");
+
+        let tarball_path = tmp.path().join("test.tar.gz");
+        fs::write(&tarball_path, &tarball).unwrap();
+
+        let dest = tmp.path().join("extracted");
+        fs::create_dir(&dest).unwrap();
+
+        let err = extract_tarball(&tarball_path, &dest).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("link target escapes destination directory")
         );
     }
 
