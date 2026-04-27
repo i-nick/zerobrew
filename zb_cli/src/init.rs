@@ -83,19 +83,23 @@ pub fn run_init(
     ui.heading("Initializing zerobrew...")?;
 
     let home = std::env::var("HOME").map_err(|_| InitError::Message("HOME not set".to_string()))?;
-    let zerobrew_bin = format!("{home}/.local/bin");
+    let zerobrew_bin_path = PathBuf::from(format!("{home}/.local/bin"));
+    std::fs::create_dir_all(&zerobrew_bin_path).map_err(|e| {
+        InitError::Message(format!(
+            "Failed to create {}: {}",
+            zerobrew_bin_path.display(),
+            e
+        ))
+    })?;
+    if !is_writable(&zerobrew_bin_path) {
+        return Err(InitError::Message(format!(
+            "{} is not writable by the current user",
+            zerobrew_bin_path.display()
+        )));
+    }
+    let zerobrew_bin = zerobrew_bin_path.to_string_lossy().to_string();
 
-    let dirs_to_create: Vec<PathBuf> = vec![
-        PathBuf::from(&zerobrew_bin),
-        root.to_path_buf(),
-        root.join("store"),
-        root.join("db"),
-        root.join("cache"),
-        root.join("locks"),
-        prefix.to_path_buf(),
-        prefix.join("bin"),
-        prefix.join("Cellar"),
-    ];
+    let dirs_to_create = init_managed_dirs(root, prefix);
 
     let need_sudo = dirs_to_create.iter().any(|d| {
         if d.exists() {
@@ -172,6 +176,19 @@ pub fn run_init(
     ui.heading("Initialization complete!")?;
 
     Ok(())
+}
+
+fn init_managed_dirs(root: &Path, prefix: &Path) -> Vec<PathBuf> {
+    vec![
+        root.to_path_buf(),
+        root.join("store"),
+        root.join("db"),
+        root.join("cache"),
+        root.join("locks"),
+        prefix.to_path_buf(),
+        prefix.join("bin"),
+        prefix.join("Cellar"),
+    ]
 }
 
 const ZB_BLOCK_START: &str = "# >>> zerobrew >>>";
@@ -556,6 +573,43 @@ mod tests {
         let mut perms = fs::metadata(&readonly).unwrap().permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&readonly, perms).unwrap();
+    }
+
+    #[test]
+    fn init_managed_dirs_exclude_user_bin_dir() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("root");
+        let prefix = tmp.path().join("prefix");
+        let user_bin = tmp.path().join(".local/bin");
+
+        let dirs = init_managed_dirs(&root, &prefix);
+
+        assert!(!dirs.contains(&user_bin));
+        assert!(dirs.contains(&root));
+        assert!(dirs.contains(&prefix));
+    }
+
+    #[test]
+    fn run_init_creates_local_bin_as_user_dir() {
+        let _lock = env_lock();
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        let root = tmp.path().join("root");
+        let prefix = tmp.path().join("prefix");
+        let user_bin = home.join(".local/bin");
+
+        fs::create_dir(&home).unwrap();
+
+        unsafe {
+            std::env::set_var("HOME", home.to_str().unwrap());
+            std::env::set_var("SHELL", "/bin/bash");
+        }
+
+        let mut ui = Ui::new();
+        run_init(&root, &prefix, true, &mut ui).unwrap();
+
+        assert!(user_bin.is_dir());
+        assert!(is_writable(&user_bin));
     }
 
     #[test]
