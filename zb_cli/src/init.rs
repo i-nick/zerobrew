@@ -82,17 +82,11 @@ pub fn run_init(
 
     ui.heading("Initializing zerobrew...")?;
 
-    let zerobrew_dir = match std::env::var("ZEROBREW_DIR") {
-        Ok(dir) => dir,
-        Err(_) => {
-            let home = std::env::var("HOME")
-                .map_err(|_| InitError::Message("HOME not set".to_string()))?;
-            format!("{}/.zerobrew", home)
-        }
-    };
-    let zerobrew_bin = format!("{}/bin", zerobrew_dir);
+    let home = std::env::var("HOME").map_err(|_| InitError::Message("HOME not set".to_string()))?;
+    let zerobrew_bin = format!("{home}/.local/bin");
 
     let dirs_to_create: Vec<PathBuf> = vec![
+        PathBuf::from(&zerobrew_bin),
         root.to_path_buf(),
         root.join("store"),
         root.join("db"),
@@ -173,14 +167,7 @@ pub fn run_init(
         }
     }
 
-    add_to_path(
-        prefix,
-        &zerobrew_dir,
-        &zerobrew_bin,
-        root,
-        no_modify_path,
-        ui,
-    )?;
+    add_to_path(prefix, &zerobrew_bin, root, no_modify_path, ui)?;
 
     ui.heading("Initialization complete!")?;
 
@@ -222,7 +209,6 @@ fn upsert_managed_block(existing: &str, managed_block: &str) -> String {
 
 fn add_to_path(
     prefix: &Path,
-    zerobrew_dir: &str,
     zerobrew_bin: &str,
     root: &Path,
     no_modify_path: bool,
@@ -273,8 +259,6 @@ fn add_to_path(
             ShellConfigKind::Posix => format!(
                 r#"
 # zerobrew
-export ZEROBREW_DIR={zerobrew_dir}
-export ZEROBREW_BIN={zerobrew_bin}
 export ZEROBREW_ROOT={root}
 export ZEROBREW_PREFIX={prefix}
 export PKG_CONFIG_PATH="$ZEROBREW_PREFIX/lib/pkgconfig:${{PKG_CONFIG_PATH:-}}"
@@ -315,10 +299,9 @@ _zb_path_append() {{
     esac;
 }}
 
-_zb_path_append "$ZEROBREW_BIN"
+_zb_path_append "{zerobrew_bin}"
 _zb_path_append "$ZEROBREW_PREFIX/bin"
 "#,
-                zerobrew_dir = zerobrew_dir,
                 zerobrew_bin = zerobrew_bin,
                 root = root.display(),
                 prefix = prefix.display()
@@ -326,8 +309,6 @@ _zb_path_append "$ZEROBREW_PREFIX/bin"
             ShellConfigKind::Fish => format!(
                 r#"
 # zerobrew
-set -gx ZEROBREW_DIR "{zerobrew_dir}"
-set -gx ZEROBREW_BIN "{zerobrew_bin}"
 set -gx ZEROBREW_ROOT "{root}"
 set -gx ZEROBREW_PREFIX "{prefix}"
 if set -q PKG_CONFIG_PATH
@@ -363,14 +344,13 @@ if not set -q SSL_CERT_DIR
     end
 end
 
-if not contains -- "$ZEROBREW_BIN" $PATH
-    set -gx PATH "$ZEROBREW_BIN" $PATH
+if not contains -- "{zerobrew_bin}" $PATH
+    set -gx PATH "{zerobrew_bin}" $PATH
 end
 if not contains -- "$ZEROBREW_PREFIX/bin" $PATH
     set -gx PATH "$ZEROBREW_PREFIX/bin" $PATH
 end
 "#,
-                zerobrew_dir = zerobrew_dir,
                 zerobrew_bin = zerobrew_bin,
                 root = root.display(),
                 prefix = prefix.display()
@@ -485,20 +465,13 @@ mod tests {
 
     fn add_to_path(
         prefix: &Path,
-        zerobrew_dir: &str,
+        _zerobrew_dir: &str,
         zerobrew_bin: &str,
         root: &Path,
         no_modify_path: bool,
     ) -> Result<(), InitError> {
         let mut ui = Ui::new();
-        super::add_to_path(
-            prefix,
-            zerobrew_dir,
-            zerobrew_bin,
-            root,
-            no_modify_path,
-            &mut ui,
-        )
+        super::add_to_path(prefix, zerobrew_bin, root, no_modify_path, &mut ui)
     }
     use std::os::unix::fs::PermissionsExt;
     use std::sync::{Mutex, OnceLock};
@@ -593,8 +566,8 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let root = tmp.path().join("root");
         let shell_config = home.join(".bashrc");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&prefix).unwrap();
         fs::create_dir(&root).unwrap();
@@ -612,8 +585,8 @@ mod tests {
         let content = fs::read_to_string(&shell_config).unwrap();
         assert!(content.contains(ZB_BLOCK_START));
         assert!(content.contains(ZB_BLOCK_END));
-        assert!(content.contains("export ZEROBREW_DIR=/home/user/.zerobrew"));
-        assert!(content.contains("export ZEROBREW_BIN=/home/user/.zerobrew/bin"));
+        assert!(!content.contains("ZEROBREW_DIR"));
+        assert!(!content.contains("ZEROBREW_BIN"));
         assert!(content.contains(&format!("export ZEROBREW_ROOT={}", root.display())));
         assert!(content.contains(&format!("export ZEROBREW_PREFIX={}", prefix.display())));
         assert!(content.contains("export PKG_CONFIG_PATH="));
@@ -639,8 +612,8 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let root = tmp.path().join("root");
         let shell_config = home.join(".bashrc");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&prefix).unwrap();
         fs::create_dir(&root).unwrap();
@@ -668,8 +641,8 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let root = tmp.path().join("root");
         let shell_config = home.join(".bashrc");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&prefix).unwrap();
         fs::create_dir(&root).unwrap();
@@ -684,7 +657,7 @@ mod tests {
         add_to_path(&prefix, zerobrew_dir, zerobrew_bin, &root, false).unwrap();
 
         let content = fs::read_to_string(&shell_config).unwrap();
-        assert!(content.contains("_zb_path_append \"$ZEROBREW_BIN\""));
+        assert!(content.contains("_zb_path_append \"/home/user/.local/bin\""));
         assert!(content.contains("_zb_path_append \"$ZEROBREW_PREFIX/bin\""));
     }
 
@@ -696,8 +669,8 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let root = tmp.path().join("root");
         let shell_config = home.join(".bashrc");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&prefix).unwrap();
         fs::create_dir(&root).unwrap();
@@ -723,8 +696,8 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let root = tmp.path().join("root");
         let shell_config = home.join(".bashrc");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&prefix).unwrap();
         fs::create_dir(&root).unwrap();
@@ -740,7 +713,7 @@ mod tests {
         fs::write(
             &shell_config,
             format!(
-                "export KEEP_ME=true\n{ZB_BLOCK_START}\n# zerobrew\nexport ZEROBREW_DIR=/old\n{ZB_BLOCK_END}\n"
+                "export KEEP_ME=true\n{ZB_BLOCK_START}\n# zerobrew\nexport ZEROBREW_ROOT=/old\n{ZB_BLOCK_END}\n"
             ),
         )
         .unwrap();
@@ -750,8 +723,8 @@ mod tests {
         // Managed block should be replaced, preserving unrelated user content
         let content = fs::read_to_string(&shell_config).unwrap();
         assert!(content.contains("export KEEP_ME=true"));
-        assert!(content.contains("export ZEROBREW_DIR=/home/user/.zerobrew"));
-        assert!(!content.contains("export ZEROBREW_DIR=/old"));
+        assert!(content.contains("_zb_path_append \"/home/user/.local/bin\""));
+        assert!(!content.contains("ZEROBREW_DIR"));
         assert_eq!(content.matches(ZB_BLOCK_START).count(), 1);
         assert_eq!(content.matches(ZB_BLOCK_END).count(), 1);
     }
@@ -764,8 +737,8 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let root = tmp.path().join("root");
         let shell_config = home.join(".zshrc");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&prefix).unwrap();
         fs::create_dir(&root).unwrap();
@@ -792,8 +765,8 @@ mod tests {
         let root = tmp.path().join("root");
         let zshenv = home.join(".zshenv");
         let zshrc = home.join(".zshrc");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&prefix).unwrap();
         fs::create_dir(&root).unwrap();
@@ -829,8 +802,8 @@ mod tests {
         let root = tmp.path().join("root");
         let bash_profile = home.join(".bash_profile");
         let bashrc = home.join(".bashrc");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&prefix).unwrap();
         fs::create_dir(&root).unwrap();
@@ -861,8 +834,8 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let root = tmp.path().join("root");
         let profile = home.join(".profile");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&prefix).unwrap();
         fs::create_dir(&root).unwrap();
@@ -890,8 +863,8 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let root = tmp.path().join("root");
         let shell_config = zdotdir.join(".zshrc");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&zdotdir).unwrap();
         fs::create_dir(&prefix).unwrap();
@@ -924,8 +897,8 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let root = tmp.path().join("root");
         let fish_config = home.join(".config/fish/conf.d/zerobrew.fish");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&prefix).unwrap();
         fs::create_dir(&root).unwrap();
@@ -940,7 +913,8 @@ mod tests {
         assert!(fish_config.exists());
         let content = fs::read_to_string(&fish_config).unwrap();
         assert!(content.contains("# zerobrew"));
-        assert!(content.contains("set -gx ZEROBREW_DIR"));
+        assert!(!content.contains("ZEROBREW_DIR"));
+        assert!(!content.contains("ZEROBREW_BIN"));
         assert!(content.contains("if not set -q CURL_CA_BUNDLE; or not set -q SSL_CERT_FILE"));
         assert!(content.contains("if not set -q SSL_CERT_DIR"));
         assert!(content.contains("set -q CURL_CA_BUNDLE; or set -gx CURL_CA_BUNDLE"));
@@ -966,8 +940,8 @@ mod tests {
         let root = tmp.path().join("root");
         let zdotdir_zshrc = zdotdir.join(".zshrc");
         let home_zshrc = home.join(".zshrc");
-        let zerobrew_dir = "/home/user/.zerobrew";
-        let zerobrew_bin = "/home/user/.zerobrew/bin";
+        let zerobrew_dir = "/home/user/.local/bin";
+        let zerobrew_bin = "/home/user/.local/bin";
 
         fs::create_dir(&zdotdir).unwrap();
         fs::create_dir(&prefix).unwrap();
@@ -990,9 +964,9 @@ mod tests {
     #[test]
     fn upsert_managed_block_replacement_consumes_trailing_newline() {
         let managed_block =
-            format!("{ZB_BLOCK_START}\n# zerobrew\nexport ZEROBREW_DIR=/new\n{ZB_BLOCK_END}\n");
+            format!("{ZB_BLOCK_START}\n# zerobrew\nexport ZEROBREW_ROOT=/new\n{ZB_BLOCK_END}\n");
         let existing = format!(
-            "prefix\n{ZB_BLOCK_START}\n# zerobrew\nexport ZEROBREW_DIR=/old\n{ZB_BLOCK_END}\npostfix\n"
+            "prefix\n{ZB_BLOCK_START}\n# zerobrew\nexport ZEROBREW_ROOT=/old\n{ZB_BLOCK_END}\npostfix\n"
         );
 
         let first = upsert_managed_block(&existing, &managed_block);

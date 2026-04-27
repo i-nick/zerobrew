@@ -29,9 +29,6 @@ jobs:
           - os: macos-latest
             name: macos-arm64
             rust: "1.90"
-          - os: ubuntu-latest
-            name: linux
-            rust: stable
     steps:
       - uses: actions/checkout@v4
       
@@ -47,10 +44,8 @@ jobs:
       
       - name: setup pkg-config path
         run: |
-          if [ "$(uname)" = "Darwin" ] && [ -d "/opt/homebrew/lib/pkgconfig" ]; then
+          if [ -d "/opt/homebrew/lib/pkgconfig" ]; then
             echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> $GITHUB_ENV
-          elif [ "$(uname)" = "Linux" ] && [ -d "/usr/lib/x86_64-linux-gnu/pkgconfig" ]; then
-            echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}" >> $GITHUB_ENV
           fi
       
       - name: build (debug)

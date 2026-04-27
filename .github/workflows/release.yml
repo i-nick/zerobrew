@@ -89,7 +89,7 @@ jobs:
   release:
     name: Create GitHub Release
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v'))
     steps:
       - name: Download all artifacts
@@ -103,7 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           cd assets
-          sha256sum -- * > SHA256SUMS
+          shasum -a 256 -- * > SHA256SUMS
 
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@v3.2.0

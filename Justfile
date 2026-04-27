@@ -12,8 +12,7 @@ ZEROBREW_ROOT := if env('ZEROBREW_ROOT', '') != '' {
 } else {
     env('XDG_DATA_HOME', env('HOME', '~') / '.local' / 'share' ) / 'zerobrew'
 }
-ZEROBREW_DIR := env('ZEROBREW_DIR', env('HOME', '~') / '.zerobrew')
-ZEROBREW_BIN := env('ZEROBREW_BIN', env('HOME', '~') / '.local' / 'bin')
+ZEROBREW_BIN := env('HOME', '~') / '.local' / 'bin'
 ZEROBREW_PREFIX := if env('ZEROBREW_PREFIX', '') != '' {
     env('ZEROBREW_PREFIX')
 } else if os() == 'macos' {
@@ -22,6 +21,7 @@ ZEROBREW_PREFIX := if env('ZEROBREW_PREFIX', '') != '' {
     ZEROBREW_ROOT / 'prefix'
 }
 ZEROBREW_INSTALLED_BIN := ZEROBREW_BIN / 'zb'
+ZBX_INSTALLED_BIN := ZEROBREW_BIN / 'zbx'
 
 SUDO := if which('doas') != '' {
     'doas'
@@ -49,7 +49,7 @@ default:
 build: fmt-check lint
     cargo build --bin zb --bin zbx
 
-[doc('Install zb to $ZEROBREW_BIN')]
+[doc('Install zb and zbx to ~/.local/bin')]
 [group('install')]
 [script]
 install: build
@@ -115,7 +115,7 @@ uninstall:
     echo 'Running this will remove:'
     echo -en '{{BOLD}}{{RED}}'
     echo -e  "\t$ZEROBREW_INSTALLED_BIN"
-    echo -e  "\t$ZEROBREW_DIR"
+    echo -e  "\t$ZBX_INSTALLED_BIN"
     echo -e  "\t$ZEROBREW_ROOT"
     for config in "${configs_to_clean[@]}"; do
         echo -e "\tzerobrew entries in $config"
@@ -130,7 +130,7 @@ uninstall:
     done
 
     [[ -f "$ZEROBREW_INSTALLED_BIN" ]] && rm -- "$ZEROBREW_INSTALLED_BIN"
-    [[ -d "$ZEROBREW_DIR" ]] && rm -rf -- "$ZEROBREW_DIR"
+    [[ -f "$ZBX_INSTALLED_BIN" ]] && rm -- "$ZBX_INSTALLED_BIN"
 
     if [[ -d "$ZEROBREW_ROOT" ]]; then
         $SUDO rm -r -- "$ZEROBREW_ROOT"
@@ -149,7 +149,6 @@ reset:
 
     echo -e '{{BOLD}}{{YELLOW}}Warning:{{NORMAL}} This will reset zerobrew completely:'
     echo -en '{{BOLD}}{{RED}}'
-    echo -e  "\t$ZEROBREW_DIR"
     echo -e  "\t$ZEROBREW_ROOT"
     for config in "${configs_to_clean[@]}"; do
         echo -e "\tzerobrew entries in $config"
@@ -162,9 +161,6 @@ reset:
     for config in "${configs_to_clean[@]}"; do
         just _clean_shell_config "$config"
     done
-
-    [[ -d "$ZEROBREW_DIR" ]] && rm -rf -- "$ZEROBREW_DIR" && echo -e '{{BOLD}}{{GREEN}}✓{{NORMAL}} Removed '"$ZEROBREW_DIR"''
-
     if [[ -d "$ZEROBREW_ROOT" ]]; then
         $SUDO rm -rf -- "$ZEROBREW_ROOT" && echo -e '{{BOLD}}{{GREEN}}✓{{NORMAL}} Removed '"$ZEROBREW_ROOT"''
     fi

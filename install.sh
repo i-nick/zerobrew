@@ -46,18 +46,20 @@ error_exit() {
 # Cleanup on exit
 BUILD_OUTPUT=""
 DOWNLOAD_TEMP_DIR=""
+SOURCE_TEMP_DIR=""
 DOWNLOADED_ZB_PATH=""
 DOWNLOADED_ZBX_PATH=""
 cleanup() {
     printf '\033[?25h'  # Restore cursor
     [[ -n "$BUILD_OUTPUT" && -f "$BUILD_OUTPUT" ]] && rm -f "$BUILD_OUTPUT"
     [[ -n "$DOWNLOAD_TEMP_DIR" && -d "$DOWNLOAD_TEMP_DIR" ]] && rm -rf "$DOWNLOAD_TEMP_DIR"
+    [[ -n "$SOURCE_TEMP_DIR" && -d "$SOURCE_TEMP_DIR" ]] && rm -rf "$SOURCE_TEMP_DIR"
+    return 0
 }
 trap cleanup EXIT
 
 ZEROBREW_REPO="https://github.com/i-nick/zerobrew.git"
-: "${ZEROBREW_DIR:=$HOME/.zerobrew}"
-: "${ZEROBREW_BIN:=$HOME/.local/bin}"
+ZEROBREW_BIN="$HOME/.local/bin"
 
 if [[ -d "/opt/zerobrew" ]]; then
     ZEROBREW_ROOT="/opt/zerobrew"
@@ -108,7 +110,7 @@ usage() {
     printf "\n"
     printf "Options:\n"
     printf "    -h, --help               %bDisplay this help message%b\n" "$MUTED" "$NC"
-    printf "    -b, --binary <path>...   %bInstalls binaries (zb, zbx) to \$ZEROBREW_BIN%b\n" "$MUTED" "$NC"
+    printf "    -b, --binary <path>...   %bInstalls binaries (zb, zbx) to ~/.local/bin%b\n" "$MUTED" "$NC"
     printf "        --no-modify-path     %bDon't modify shell config files (.zshrc, .bashrc, etc.)%b\n" "$MUTED" "$NC"
     printf "\n"
     printf "Examples:%b\n" "$MUTED"
@@ -391,37 +393,19 @@ if ! command -v cargo >/dev/null 2>&1; then
     error_exit "Cargo not found after installing Rust. Try restarting your terminal or running: source ~/.cargo/env"
 fi
 
-# Clone or update repo
-if [[ -d "$ZEROBREW_DIR" ]]; then
-    (
-        cd "$ZEROBREW_DIR" || exit 1
-        if ! git fetch --depth=1 origin main >/dev/null 2>&1; then
-            printf "Failed to fetch updates\n" >&2
-            exit 1
-        fi
-        if ! git reset --hard origin/main >/dev/null 2>&1; then
-            printf "Failed to reset to origin/main\n" >&2
-            exit 1
-        fi
-    ) &
-    if ! spinner "Updating ${ORANGE}zerobrew${NC} repository" $!; then
-        error_exit "Failed to update zerobrew repository. Check your network connection and permissions."
+# Clone source into a temporary checkout when prebuilt binaries are unavailable.
+SOURCE_TEMP_DIR=$(mktemp -d)
+(
+    if ! git clone --depth 1 "$ZEROBREW_REPO" "$SOURCE_TEMP_DIR" >/dev/null 2>&1; then
+        printf "Failed to clone repository\n" >&2
+        exit 1
     fi
-    completed "Updated ${ORANGE}zerobrew${NC} repository"
-    cd "$ZEROBREW_DIR" || error_exit "Failed to enter directory: $ZEROBREW_DIR"
-else
-    (
-        if ! git clone --depth 1 "$ZEROBREW_REPO" "$ZEROBREW_DIR" >/dev/null 2>&1; then
-            printf "Failed to clone repository\n" >&2
-            exit 1
-        fi
-    ) &
-    if ! spinner "Cloning ${ORANGE}zerobrew${NC} repository" $!; then
-        error_exit "Failed to clone zerobrew repository. Check your network connection and that the repository exists."
-    fi
-    completed "Cloned ${ORANGE}zerobrew${NC} repository"
-    cd "$ZEROBREW_DIR" || error_exit "Failed to enter directory: $ZEROBREW_DIR"
+) &
+if ! spinner "Cloning ${ORANGE}zerobrew${NC} repository" $!; then
+    error_exit "Failed to clone zerobrew repository. Check your network connection and that the repository exists."
 fi
+completed "Cloned ${ORANGE}zerobrew${NC} repository"
+cd "$SOURCE_TEMP_DIR" || error_exit "Failed to enter directory: $SOURCE_TEMP_DIR"
 
 # Build
 if [[ -d "$ZEROBREW_PREFIX/lib/pkgconfig" ]]; then
