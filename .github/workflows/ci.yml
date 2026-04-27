@@ -22,7 +22,7 @@ permissions:
 jobs:
   fmt:
     name: fmt
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       
@@ -36,7 +36,7 @@ jobs:
 
   clippy:
     name: clippy
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       
@@ -50,10 +50,8 @@ jobs:
       
       - name: setup pkg-config path
         run: |
-          if [ "$(uname)" = "Darwin" ] && [ -d "/opt/homebrew/lib/pkgconfig" ]; then
+          if [ -d "/opt/homebrew/lib/pkgconfig" ]; then
             echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> $GITHUB_ENV
-          elif [ "$(uname)" = "Linux" ] && [ -d "/usr/lib/x86_64-linux-gnu/pkgconfig" ]; then
-            echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}" >> $GITHUB_ENV
           fi
       
       - name: run clippy
@@ -61,7 +59,7 @@ jobs:
 
   audit:
     name: audit
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       
