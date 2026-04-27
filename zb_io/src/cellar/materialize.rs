@@ -279,6 +279,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path, try_hardlink: bool) -> Result<(), 
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn copy_dir_copy_only(src: &Path, dst: &Path) -> Result<(), Error> {
     copy_dir_recursive(src, dst, false)
 }

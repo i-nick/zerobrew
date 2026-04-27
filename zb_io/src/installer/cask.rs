@@ -127,11 +127,11 @@ fn select_platform_variation_for_key<'a>(cask: &'a Value, key: &str) -> Option<&
 fn current_platform_variation_key() -> Option<&'static str> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        return Some("x86_64_linux");
+        Some("x86_64_linux")
     }
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     {
-        return Some("arm64_linux");
+        Some("arm64_linux")
     }
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
@@ -139,7 +139,7 @@ fn current_platform_variation_key() -> Option<&'static str> {
     }
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
     {
-        return current_macos_major_version().and_then(intel_macos_variation_key_for_major);
+        current_macos_major_version().and_then(intel_macos_variation_key_for_major)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {

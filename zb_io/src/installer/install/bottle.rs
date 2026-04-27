@@ -10,6 +10,7 @@ use zb_core::{Error, Formula, InstallMethod, formula_token};
 
 use crate::cellar::link::Linker;
 use crate::cellar::materialize::Cellar;
+#[cfg(target_os = "macos")]
 use crate::cellar::materialize::copy_dir_copy_only;
 use crate::installer::cask::resolve_cask;
 use crate::network::download::{DownloadProgressCallback, DownloadRequest, DownloadResult};
@@ -586,6 +587,7 @@ impl<'a> FailedInstallGuard<'a> {
         self.armed = false;
     }
 
+    #[cfg(target_os = "macos")]
     fn track_external_path(&mut self, path: PathBuf) {
         self.external_records.push(crate::cellar::link::LinkedFile {
             link_path: path.clone(),
@@ -647,12 +649,13 @@ fn install_cask_from_root(
         }
         #[cfg(not(target_os = "macos"))]
         {
-            return Err(Error::InvalidArgument {
+            let _ = (previous_external_paths, cleanup);
+            Err(Error::InvalidArgument {
                 message: format!(
                     "cask '{}' installs app bundles, which are only supported on macOS",
                     cask.token
                 ),
-            });
+            })?
         }
     } else {
         HashMap::new()
@@ -972,6 +975,7 @@ fn ensure_safe_relative_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
 fn file_name(path: &str) -> Result<String, Error> {
     Path::new(path)
         .file_name()
