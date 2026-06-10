@@ -35,26 +35,14 @@ async fn run(cli: Cli) -> Result<(), zb_core::Error> {
     }
 
     if let Commands::Init { no_modify_path } = &cli.command {
-        let prefix = cli.prefix.clone().unwrap_or_else(|| {
-            if cfg!(target_os = "macos") {
-                root.clone()
-            } else {
-                root.join("prefix")
-            }
-        });
+        let prefix = cli.prefix.clone().unwrap_or_else(|| root.clone());
         return commands::init::execute(&root, &prefix, *no_modify_path, &mut ui);
     }
 
-    let prefix = cli.prefix.unwrap_or_else(|| {
-        // On macOS, Mach-O binaries have fixed-size path fields so the prefix
-        // must be no longer than the original Homebrew prefix (/opt/homebrew = 13 chars).
-        // Using root directly (/opt/zerobrew = 13 chars) keeps us within that limit.
-        if cfg!(target_os = "macos") {
-            root.clone()
-        } else {
-            root.join("prefix")
-        }
-    });
+    // Mach-O binaries have fixed-size path fields so the prefix must be no
+    // longer than the original Homebrew prefix (/opt/homebrew = 13 chars).
+    // Using root directly (/opt/zerobrew = 13 chars) keeps us within that limit.
+    let prefix = cli.prefix.unwrap_or_else(|| root.clone());
 
     if requires_init(&cli.command) {
         ensure_init(&root, &prefix, cli.auto_init, &mut ui)?;

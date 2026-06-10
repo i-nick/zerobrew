@@ -1,4 +1,3 @@
-#[cfg(target_os = "macos")]
 use std::process::Command;
 
 use serde_json::Value;
@@ -125,29 +124,9 @@ fn select_platform_variation_for_key<'a>(cask: &'a Value, key: &str) -> Option<&
 }
 
 fn current_platform_variation_key() -> Option<&'static str> {
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    {
-        Some("x86_64_linux")
-    }
-    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    {
-        Some("arm64_linux")
-    }
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    {
-        current_macos_major_version().and_then(arm64_macos_variation_key_for_major)
-    }
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    {
-        current_macos_major_version().and_then(intel_macos_variation_key_for_major)
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
-        None
-    }
+    current_macos_major_version().and_then(arm64_macos_variation_key_for_major)
 }
 
-#[cfg(target_os = "macos")]
 fn current_macos_major_version() -> Option<u32> {
     let output = Command::new("sw_vers")
         .arg("-productVersion")
@@ -166,30 +145,14 @@ fn current_macos_major_version() -> Option<u32> {
         .ok()
 }
 
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn arm64_macos_variation_key_for_major(major: u32) -> Option<&'static str> {
     match major {
-        27.. => Some("arm64_tahoe"),
-        26 => Some("arm64_tahoe"),
+        26.. => Some("arm64_tahoe"),
         15 => Some("arm64_sequoia"),
         14 => Some("arm64_sonoma"),
         13 => Some("arm64_ventura"),
         12 => Some("arm64_monterey"),
         11 => Some("arm64_big_sur"),
-        _ => None,
-    }
-}
-
-#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-fn intel_macos_variation_key_for_major(major: u32) -> Option<&'static str> {
-    match major {
-        26 => Some("tahoe"),
-        15 => Some("sequoia"),
-        14 => Some("sonoma"),
-        13 => Some("ventura"),
-        12 => Some("monterey"),
-        11 => Some("big_sur"),
-        10 => Some("catalina"),
         _ => None,
     }
 }
@@ -432,7 +395,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_cask_uses_platform_variation_url_and_sha() {
+    fn resolve_cask_ignores_non_apple_silicon_variations() {
         let cask = serde_json::json!({
             "token": "test",
             "version": "1.0.0",
@@ -448,16 +411,13 @@ mod tests {
             }
         });
 
-        let _resolved = resolve_cask("test", &cask).unwrap();
-        #[cfg(target_os = "linux")]
-        {
-            assert_eq!(_resolved.version, "0.9.0");
-            assert_eq!(_resolved.url, "https://example.com/linux.zip");
-            assert_eq!(
-                _resolved.sha256,
-                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-            );
-        }
+        let resolved = resolve_cask("test", &cask).unwrap();
+        assert_eq!(resolved.version, "1.0.0");
+        assert_eq!(resolved.url, "https://example.com/darwin.zip");
+        assert_eq!(
+            resolved.sha256,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
     }
 
     #[test]
@@ -480,7 +440,6 @@ mod tests {
         );
     }
 
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[test]
     fn resolve_cask_keeps_top_level_artifact_when_only_older_macos_variation_exists() {
         let cask = serde_json::json!({
@@ -513,7 +472,6 @@ mod tests {
         );
     }
 
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[test]
     fn arm64_variation_key_uses_tahoe_for_newer_macos_versions() {
         assert_eq!(arm64_macos_variation_key_for_major(27), Some("arm64_tahoe"));

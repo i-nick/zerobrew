@@ -3,23 +3,9 @@ set dotenv-load
 set unstable
 set script-interpreter := ['bash', '-euo', 'pipefail']
 
-ZEROBREW_ROOT := if env('ZEROBREW_ROOT', '') != '' {
-    env('ZEROBREW_ROOT')
-} else if path_exists('/opt/zerobrew') == 'true' {
-    '/opt/zerobrew'
-} else if os() == 'macos' {
-    '/opt/zerobrew'
-} else {
-    env('XDG_DATA_HOME', env('HOME', '~') / '.local' / 'share' ) / 'zerobrew'
-}
+ZEROBREW_ROOT := env('ZEROBREW_ROOT', '/opt/zerobrew')
 ZEROBREW_BIN := env('HOME', '~') / '.local' / 'bin'
-ZEROBREW_PREFIX := if env('ZEROBREW_PREFIX', '') != '' {
-    env('ZEROBREW_PREFIX')
-} else if os() == 'macos' {
-    ZEROBREW_ROOT
-} else {
-    ZEROBREW_ROOT / 'prefix'
-}
+ZEROBREW_PREFIX := env('ZEROBREW_PREFIX', ZEROBREW_ROOT)
 ZEROBREW_INSTALLED_BIN := ZEROBREW_BIN / 'zb'
 ZBX_INSTALLED_BIN := ZEROBREW_BIN / 'zbx'
 

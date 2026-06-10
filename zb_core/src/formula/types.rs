@@ -135,16 +135,7 @@ impl Formula {
         if self.name.contains('@') {
             return true;
         }
-        if matches!(self.keg_only, KegOnly::No) {
-            return false;
-        }
-        #[cfg(not(target_os = "macos"))]
-        if let Some(ref reason) = self.keg_only_reason
-            && reason.is_macos_specific()
-        {
-            return false;
-        }
-        true
+        !matches!(self.keg_only, KegOnly::No)
     }
 
     pub fn source_url(&self) -> Option<&SourceUrl> {
@@ -156,16 +147,8 @@ impl Formula {
     }
 
     pub fn all_build_dependencies(&self) -> Vec<String> {
-        let deps = self.build_dependencies.clone();
-        #[cfg(not(target_os = "macos"))]
-        let deps = {
-            let mut deps = deps;
-            for u in &self.uses_from_macos {
-                deps.push(u.name().to_string());
-            }
-            deps
-        };
-        deps
+        // `uses_from_macos` dependencies are provided by macOS itself.
+        self.build_dependencies.clone()
     }
 }
 
@@ -347,24 +330,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
-    fn provided_by_macos_not_keg_only_on_linux() {
-        let json = r#"{
-            "name": "sqlite",
-            "versions": { "stable": "3.51.2" },
-            "dependencies": [],
-            "keg_only": true,
-            "keg_only_reason": { "reason": ":provided_by_macos", "explanation": "" },
-            "bottle": { "stable": { "files": {
-                "x86_64_linux": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
-            }}}
-        }"#;
-        let formula: Formula = serde_json::from_str(json).unwrap();
-        assert!(!formula.is_keg_only());
-    }
-
-    #[test]
-    #[cfg(target_os = "macos")]
     fn provided_by_macos_still_keg_only_on_macos() {
         let json = r#"{
             "name": "sqlite",

@@ -25,24 +25,8 @@ fn main() {
     let mut cmd = Command::new(&zb_path);
     cmd.arg("run").args(&args);
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let err = cmd.exec();
-        eprintln!("{} {}", style("error:").red().bold(), err);
-        std::process::exit(1);
-    }
-
-    #[cfg(not(unix))]
-    {
-        match cmd.status() {
-            Ok(status) => {
-                std::process::exit(status.code().unwrap_or(1));
-            }
-            Err(e) => {
-                eprintln!("{} {}", style("error:").red().bold(), e);
-                std::process::exit(1);
-            }
-        }
-    }
+    use std::os::unix::process::CommandExt;
+    let err = cmd.exec();
+    eprintln!("{} {}", style("error:").red().bold(), err);
+    std::process::exit(1);
 }

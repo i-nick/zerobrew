@@ -3,18 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use zb_core::Error;
 
-#[cfg(target_os = "linux")]
-use crate::extraction::patch::linux::patch_placeholders;
-
-#[cfg(target_os = "macos")]
 use crate::extraction::patch::macos::{codesign_and_strip_xattrs, patch_homebrew_placeholders};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CopyStrategy {
-    Clonefile,
-    Hardlink,
-    Copy,
-}
 
 pub struct Cellar {
     cellar_dir: PathBuf,
@@ -116,27 +105,9 @@ impl Cellar {
         copy_dir_with_fallback(&src_path, &keg_path)?;
 
         // Patch Homebrew placeholders in Mach-O binaries
-        #[cfg(target_os = "macos")]
         patch_homebrew_placeholders(&keg_path, &self.cellar_dir, name, version)?;
 
-        // Patch Homebrew placeholders in ELF binaries
-        #[cfg(target_os = "linux")]
-        {
-            // Derive prefix from cellar_dir directly without hardcoded fallback
-            let prefix = self
-                .cellar_dir
-                .parent()
-                .ok_or_else(|| Error::StoreCorruption {
-                    message: format!(
-                        "Invalid cellar directory (no parent): {}",
-                        self.cellar_dir.display()
-                    ),
-                })?;
-            patch_placeholders(&keg_path, prefix, name, version)?;
-        }
-
         // Strip quarantine xattrs and ad-hoc sign Mach-O binaries
-        #[cfg(target_os = "macos")]
         codesign_and_strip_xattrs(&keg_path)?;
 
         Ok(keg_path)
@@ -193,18 +164,14 @@ fn find_bottle_content(store_entry: &Path, name: &str, version: &str) -> Result<
 
 fn copy_dir_with_fallback(src: &Path, dst: &Path) -> Result<(), Error> {
     // Try clonefile first (APFS), then hardlink, then copy
-    #[cfg(target_os = "macos")]
-    {
-        if try_clonefile_dir(src, dst).is_ok() {
-            return Ok(());
-        }
+    if try_clonefile_dir(src, dst).is_ok() {
+        return Ok(());
     }
 
     // Fall back to recursive copy with hardlink/copy per file
     copy_dir_recursive(src, dst, true)
 }
 
-#[cfg(target_os = "macos")]
 fn try_clonefile_dir(src: &Path, dst: &Path) -> io::Result<()> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
@@ -249,13 +216,8 @@ fn copy_dir_recursive(src: &Path, dst: &Path, try_hardlink: bool) -> Result<(), 
             let target =
                 fs::read_link(&src_path).map_err(Error::store("failed to read symlink"))?;
 
-            #[cfg(unix)]
             std::os::unix::fs::symlink(&target, &dst_path)
                 .map_err(Error::store("failed to create symlink"))?;
-
-            #[cfg(not(unix))]
-            fs::copy(&src_path, &dst_path)
-                .map_err(Error::store("failed to copy symlink as file"))?;
         } else {
             // Try hardlink first, then copy
             if try_hardlink && fs::hard_link(&src_path, &dst_path).is_ok() {
@@ -266,20 +228,16 @@ fn copy_dir_recursive(src: &Path, dst: &Path, try_hardlink: bool) -> Result<(), 
             fs::copy(&src_path, &dst_path).map_err(Error::store("failed to copy file"))?;
 
             // Preserve permissions
-            #[cfg(unix)]
-            {
-                let metadata =
-                    fs::metadata(&src_path).map_err(Error::store("failed to read metadata"))?;
-                fs::set_permissions(&dst_path, metadata.permissions())
-                    .map_err(Error::store("failed to set permissions"))?;
-            }
+            let metadata =
+                fs::metadata(&src_path).map_err(Error::store("failed to read metadata"))?;
+            fs::set_permissions(&dst_path, metadata.permissions())
+                .map_err(Error::store("failed to set permissions"))?;
         }
     }
 
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
 pub(crate) fn copy_dir_copy_only(src: &Path, dst: &Path) -> Result<(), Error> {
     copy_dir_recursive(src, dst, false)
 }
@@ -426,7 +384,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "macos")]
     fn clonefile_fallback_works() {
         // On APFS, clonefile should work
         let tmp = TempDir::new().unwrap();

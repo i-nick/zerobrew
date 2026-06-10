@@ -27,18 +27,8 @@ zip.workspace = true
 tracing.workspace = true
 strsim.workspace = true
 tempfile.workspace = true
+reqwest.workspace = true
 zb_core = { path = "../zb_core" }
-arwen = "0.0.5"
-object = "0.38.1"
-
-[features]
-android-support = ["reqwest/native-tls"]
-
-[target.'cfg(not(target_os = "android"))'.dependencies]
-reqwest = { workspace = true }
-
-[target.'cfg(target_os = "android")'.dependencies]
-reqwest = { version = "0.13.1", default-features = false, features = ["json", "stream", "http2"] }
 
 [dev-dependencies]
 tempfile.workspace = true

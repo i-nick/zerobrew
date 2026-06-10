@@ -1,3 +1,6 @@
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+compile_error!("zerobrew only supports macOS on Apple Silicon (aarch64-apple-darwin)");
+
 pub mod build;
 pub mod cellar;
 pub(crate) mod checksum;

@@ -234,10 +234,7 @@ end
         )
         .unwrap();
 
-        #[cfg(target_arch = "aarch64")]
         assert_eq!(cask["url"], "https://example.com/1.2.3/456/arm.zip");
-        #[cfg(target_arch = "x86_64")]
-        assert_eq!(cask["url"], "https://example.com/1.2.3,456/intel.zip");
     }
 
     #[test]

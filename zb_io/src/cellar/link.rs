@@ -338,7 +338,6 @@ impl Linker {
                 continue;
             }
 
-            #[cfg(unix)]
             std::os::unix::fs::symlink(&src_path, &dst_path)
                 .map_err(Error::store("failed to create symlink"))?;
             linked.push(LinkedFile {
@@ -440,7 +439,6 @@ impl Linker {
                 });
             }
 
-            #[cfg(unix)]
             std::os::unix::fs::symlink(&src_path, &dst_path)
                 .map_err(Error::store("failed to create symlink"))?;
             linked.push(LinkedFile {
@@ -586,7 +584,6 @@ impl Linker {
             }
             let _ = fs::remove_file(&opt_link);
         }
-        #[cfg(unix)]
         std::os::unix::fs::symlink(keg_path, &opt_link)
             .map_err(Error::store("failed to create opt symlink"))?;
         Ok(())
@@ -958,14 +955,12 @@ mod tests {
         fs::create_dir_all(keg1.join("share/gnuman/man1")).unwrap();
         fs::write(keg1.join("share/gnuman/man1/sed.1"), b"sed man").unwrap();
         fs::create_dir_all(keg1.join("share/gnubin")).unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink("../gnuman", keg1.join("share/gnubin/man")).unwrap();
 
         let keg2 = prefix.join("Cellar/gnu-tar/1.35");
         fs::create_dir_all(keg2.join("share/gnuman/man1")).unwrap();
         fs::write(keg2.join("share/gnuman/man1/tar.1"), b"tar man").unwrap();
         fs::create_dir_all(keg2.join("share/gnubin")).unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink("../gnuman", keg2.join("share/gnubin/man")).unwrap();
 
         // Both should link without conflicts
@@ -989,13 +984,11 @@ mod tests {
         let keg1 = prefix.join("Cellar/pkg1/1.0.0");
         fs::create_dir_all(keg1.join("share/realdir")).unwrap();
         fs::write(keg1.join("share/realdir/file1"), b"a").unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink("realdir", keg1.join("share/alias")).unwrap();
 
         let keg2 = prefix.join("Cellar/pkg2/1.0.0");
         fs::create_dir_all(keg2.join("share/realdir")).unwrap();
         fs::write(keg2.join("share/realdir/file2"), b"b").unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink("realdir", keg2.join("share/alias")).unwrap();
 
         linker.link_keg(&keg1).unwrap();

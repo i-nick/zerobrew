@@ -44,25 +44,14 @@ impl Installer {
             let method = if build_from_source {
                 match BuildPlan::from_formula(&formula, &self.prefix) {
                     Some(plan) => InstallMethod::Source(plan),
-                    None => match select_bottle(&formula) {
-                        Ok(bottle) => InstallMethod::Bottle(bottle),
-                        Err(_) => {
-                            return Err(Error::UnsupportedBottle {
-                                name: formula.name.clone(),
-                            });
-                        }
-                    },
+                    None => InstallMethod::Bottle(select_bottle(&formula)?),
                 }
             } else {
                 match select_bottle(&formula) {
                     Ok(bottle) => InstallMethod::Bottle(bottle),
-                    Err(_) => match BuildPlan::from_formula(&formula, &self.prefix) {
+                    Err(bottle_err) => match BuildPlan::from_formula(&formula, &self.prefix) {
                         Some(plan) => InstallMethod::Source(plan),
-                        None => {
-                            return Err(Error::UnsupportedBottle {
-                                name: formula.name.clone(),
-                            });
-                        }
+                        None => return Err(bottle_err),
                     },
                 }
             };

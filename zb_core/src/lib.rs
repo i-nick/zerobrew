@@ -8,8 +8,5 @@ pub use context::{ConcurrencyLimits, Context, LogLevel, LoggerHandle, Paths};
 pub use errors::{ConflictedLink, Error};
 pub use formula::{
     Formula, KegOnly, KegOnlyReason, SelectedBottle, compatible_codenames, formula_token,
-    resolve_closure, select_bottle,
+    macos_major_version, resolve_closure, select_bottle,
 };
-
-#[cfg(target_os = "macos")]
-pub use formula::macos_major_version;

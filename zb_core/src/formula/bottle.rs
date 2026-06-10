@@ -7,104 +7,81 @@ pub struct SelectedBottle {
     pub sha256: String,
 }
 
-const MACOS_CODENAMES_NEWEST_FIRST: &[&str] = &["tahoe", "sequoia", "sonoma", "ventura"];
+/// macOS codenames that can run on Apple Silicon, newest first.
+/// Big Sur (11) was the first Apple Silicon release, so this list covers
+/// every arm64 bottle tag Homebrew has ever published.
+const MACOS_CODENAMES_NEWEST_FIRST: &[&str] = &[
+    "tahoe", "sequoia", "sonoma", "ventura", "monterey", "big_sur",
+];
 
-#[cfg(target_os = "macos")]
 pub fn macos_major_version() -> Option<u32> {
     let output = std::process::Command::new("sw_vers")
         .arg("-productVersion")
         .output()
         .ok()?;
+    if !output.status.success() {
+        return None;
+    }
     let version = String::from_utf8_lossy(&output.stdout);
     version.trim().split('.').next()?.parse().ok()
 }
 
 fn codename_for_major(major: u32) -> Option<&'static str> {
     match major {
-        26 => Some("tahoe"),
+        // Future macOS releases run bottles for every older release; treat
+        // them as the newest codename we know about.
+        26.. => Some("tahoe"),
         15 => Some("sequoia"),
         14 => Some("sonoma"),
         13 => Some("ventura"),
+        12 => Some("monterey"),
+        11 => Some("big_sur"),
         _ => None,
     }
 }
 
+/// Codenames whose bottles run on the given macOS major version (a bottle
+/// built for an older macOS runs on newer releases), newest first.
 pub fn compatible_codenames(major_version: Option<u32>) -> Vec<&'static str> {
-    let Some(major) = major_version else {
-        return MACOS_CODENAMES_NEWEST_FIRST.to_vec();
-    };
-
-    let Some(pos) = codename_for_major(major)
+    let Some(pos) = major_version
+        .and_then(codename_for_major)
         .and_then(|c| MACOS_CODENAMES_NEWEST_FIRST.iter().position(|&t| t == c))
     else {
+        // Unknown macOS version: accept any bottle rather than failing.
         return MACOS_CODENAMES_NEWEST_FIRST.to_vec();
     };
 
     MACOS_CODENAMES_NEWEST_FIRST[pos..].to_vec()
 }
 
+/// Select the best Apple Silicon bottle for the running macOS version.
+///
+/// Preference order: the newest compatible `arm64_*` tag, then the
+/// architecture-independent `all` tag. Anything else (Intel macOS or Linux
+/// tags) cannot run on Apple Silicon and is reported via
+/// [`Error::UnsupportedBottle`] together with the tags that were available.
 pub fn select_bottle(formula: &Formula) -> Result<SelectedBottle, Error> {
-    #[cfg(target_os = "macos")]
-    let macos_version = macos_major_version();
-    #[cfg(not(target_os = "macos"))]
-    let macos_version: Option<u32> = None;
-
-    select_bottle_with_version(formula, macos_version)
+    select_bottle_with_version(formula, macos_major_version())
 }
 
 fn select_bottle_with_version(
     formula: &Formula,
     macos_version: Option<u32>,
 ) -> Result<SelectedBottle, Error> {
-    // Consumed only in #[cfg(target_os = "macos")] blocks; silence unused-variable on Linux.
-    let _ = &macos_version;
+    let files = &formula.bottle.stable.files;
 
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    {
-        let codenames = compatible_codenames(macos_version);
-        let tags: Vec<String> = codenames.iter().map(|c| format!("arm64_{c}")).collect();
-
-        for tag in &tags {
-            if let Some(file) = formula.bottle.stable.files.get(tag.as_str()) {
-                return Ok(SelectedBottle {
-                    tag: tag.clone(),
-                    url: file.url.clone(),
-                    sha256: file.sha256.clone(),
-                });
-            }
+    for codename in compatible_codenames(macos_version) {
+        let tag = format!("arm64_{codename}");
+        if let Some(file) = files.get(tag.as_str()) {
+            return Ok(SelectedBottle {
+                tag,
+                url: file.url.clone(),
+                sha256: file.sha256.clone(),
+            });
         }
     }
 
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    {
-        let tags = compatible_codenames(macos_version);
-
-        for tag in &tags {
-            if let Some(file) = formula.bottle.stable.files.get(*tag) {
-                return Ok(SelectedBottle {
-                    tag: tag.to_string(),
-                    url: file.url.clone(),
-                    sha256: file.sha256.clone(),
-                });
-            }
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let linux_tags = ["x86_64_linux"];
-        for preferred_tag in linux_tags {
-            if let Some(file) = formula.bottle.stable.files.get(preferred_tag) {
-                return Ok(SelectedBottle {
-                    tag: preferred_tag.to_string(),
-                    url: file.url.clone(),
-                    sha256: file.sha256.clone(),
-                });
-            }
-        }
-    }
-
-    if let Some(file) = formula.bottle.stable.files.get("all") {
+    if let Some(file) = files.get("all") {
         return Ok(SelectedBottle {
             tag: "all".to_string(),
             url: file.url.clone(),
@@ -112,52 +89,9 @@ fn select_bottle_with_version(
         });
     }
 
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    {
-        let codenames = compatible_codenames(macos_version);
-        for (tag, file) in &formula.bottle.stable.files {
-            if tag.starts_with("arm64_") && !tag.contains("linux") {
-                let bare = tag.strip_prefix("arm64_").unwrap_or(tag);
-                if codenames.contains(&bare) {
-                    return Ok(SelectedBottle {
-                        tag: tag.clone(),
-                        url: file.url.clone(),
-                        sha256: file.sha256.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    {
-        let codenames = compatible_codenames(macos_version);
-        for (tag, file) in &formula.bottle.stable.files {
-            if !tag.starts_with("arm64_") && !tag.contains("linux") && tag != "all" {
-                if codenames.contains(&tag.as_str()) {
-                    return Ok(SelectedBottle {
-                        tag: tag.clone(),
-                        url: file.url.clone(),
-                        sha256: file.sha256.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    for (tag, file) in &formula.bottle.stable.files {
-        if tag.contains("linux") {
-            return Ok(SelectedBottle {
-                tag: tag.clone(),
-                url: file.url.clone(),
-                sha256: file.sha256.clone(),
-            });
-        }
-    }
-
     Err(Error::UnsupportedBottle {
         name: formula.name.clone(),
+        available: files.keys().cloned().collect(),
     })
 }
 
@@ -167,51 +101,52 @@ mod tests {
     use crate::formula::types::{Bottle, BottleFile, BottleStable, KegOnly, Versions};
     use std::collections::BTreeMap;
 
+    fn formula_with_files(name: &str, files: BTreeMap<String, BottleFile>) -> Formula {
+        Formula {
+            name: name.to_string(),
+            versions: Versions {
+                stable: "1.0.0".to_string(),
+            },
+            dependencies: Vec::new(),
+            bottle: Bottle {
+                stable: BottleStable { files, rebuild: 0 },
+            },
+            revision: 0,
+            keg_only: KegOnly::default(),
+            keg_only_reason: None,
+            build_dependencies: Vec::new(),
+            urls: None,
+            ruby_source_path: None,
+            ruby_source_checksum: None,
+            uses_from_macos: Vec::new(),
+            requirements: Vec::new(),
+            variations: None,
+        }
+    }
+
+    fn bottle_file(url: &str, sha256: &str) -> BottleFile {
+        BottleFile {
+            url: url.to_string(),
+            sha256: sha256.to_string(),
+        }
+    }
+
     #[test]
-    fn selects_platform_bottle() {
+    fn selects_arm64_bottle() {
         let fixture = include_str!("../../fixtures/formula_foo.json");
         let formula: Formula = serde_json::from_str(fixture).unwrap();
 
-        let selected = select_bottle(&formula).unwrap();
+        let selected = select_bottle_with_version(&formula, Some(14)).unwrap();
 
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        {
-            assert_eq!(selected.tag, "arm64_sonoma");
-            assert_eq!(
-                selected.url,
-                "https://example.com/foo-1.2.3.arm64_sonoma.bottle.tar.gz"
-            );
-            assert_eq!(
-                selected.sha256,
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-            );
-        }
-
-        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-        {
-            assert_eq!(selected.tag, "sonoma");
-            assert_eq!(
-                selected.url,
-                "https://example.com/foo-1.2.3.sonoma.bottle.tar.gz"
-            );
-            assert_eq!(
-                selected.sha256,
-                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-            );
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            assert_eq!(selected.tag, "x86_64_linux");
-            assert_eq!(
-                selected.url,
-                "https://example.com/foo-1.2.3.x86_64_linux.bottle.tar.gz"
-            );
-            assert_eq!(
-                selected.sha256,
-                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-            );
-        }
+        assert_eq!(selected.tag, "arm64_sonoma");
+        assert_eq!(
+            selected.url,
+            "https://example.com/foo-1.2.3.arm64_sonoma.bottle.tar.gz"
+        );
+        assert_eq!(
+            selected.sha256,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
     }
 
     #[test]
@@ -219,252 +154,164 @@ mod tests {
         let mut files = BTreeMap::new();
         files.insert(
             "all".to_string(),
-            BottleFile {
-                url: "https://ghcr.io/v2/homebrew/core/ca-certificates/blobs/sha256:abc123"
-                    .to_string(),
-                sha256: "abc123".to_string(),
-            },
+            bottle_file(
+                "https://ghcr.io/v2/homebrew/core/ca-certificates/blobs/sha256:abc123",
+                "abc123",
+            ),
         );
 
-        let formula = Formula {
-            name: "ca-certificates".to_string(),
-            versions: Versions {
-                stable: "2024-01-01".to_string(),
-            },
-            dependencies: Vec::new(),
-            bottle: Bottle {
-                stable: BottleStable { files, rebuild: 0 },
-            },
-            revision: 0,
-            keg_only: KegOnly::default(),
-            keg_only_reason: None,
-            build_dependencies: Vec::new(),
-            urls: None,
-            ruby_source_path: None,
-            ruby_source_checksum: None,
-            uses_from_macos: Vec::new(),
-            requirements: Vec::new(),
-            variations: None,
-        };
+        let formula = formula_with_files("ca-certificates", files);
 
-        let selected = select_bottle(&formula).unwrap();
+        let selected = select_bottle_with_version(&formula, Some(15)).unwrap();
         assert_eq!(selected.tag, "all");
         assert!(selected.url.contains("ca-certificates"));
     }
 
     #[test]
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    fn errors_when_no_arm64_bottle() {
+    fn errors_when_only_intel_bottle_exists() {
         let mut files = BTreeMap::new();
         files.insert(
             "sonoma".to_string(),
-            BottleFile {
-                url: "https://example.com/legacy.tar.gz".to_string(),
-                sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-                    .to_string(),
-            },
+            bottle_file("https://example.com/legacy.tar.gz", &"c".repeat(64)),
         );
 
-        let formula = Formula {
-            name: "legacy".to_string(),
-            versions: Versions {
-                stable: "0.1.0".to_string(),
-            },
-            dependencies: Vec::new(),
-            bottle: Bottle {
-                stable: BottleStable { files, rebuild: 0 },
-            },
-            revision: 0,
-            keg_only: KegOnly::default(),
-            keg_only_reason: None,
-            build_dependencies: Vec::new(),
-            urls: None,
-            ruby_source_path: None,
-            ruby_source_checksum: None,
-            uses_from_macos: Vec::new(),
-            requirements: Vec::new(),
-            variations: None,
-        };
+        let formula = formula_with_files("legacy", files);
 
-        let err = select_bottle(&formula).unwrap_err();
+        let err = select_bottle_with_version(&formula, Some(14)).unwrap_err();
         assert!(matches!(
             err,
-            Error::UnsupportedBottle { name } if name == "legacy"
+            Error::UnsupportedBottle { ref name, ref available }
+                if name == "legacy" && available == &vec!["sonoma".to_string()]
         ));
+        let message = err.to_string();
+        assert!(message.contains("legacy"), "got: {message}");
+        assert!(message.contains("Apple Silicon"), "got: {message}");
+        assert!(message.contains("sonoma"), "got: {message}");
     }
 
     #[test]
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    fn errors_when_no_x86_64_bottle() {
+    fn errors_when_only_linux_bottle_exists() {
         let mut files = BTreeMap::new();
         files.insert(
-            "arm64_sonoma".to_string(),
-            BottleFile {
-                url: "https://example.com/legacy.tar.gz".to_string(),
-                sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    .to_string(),
-            },
+            "x86_64_linux".to_string(),
+            bottle_file("https://example.com/linux.tar.gz", &"b".repeat(64)),
         );
 
-        let formula = Formula {
-            name: "legacy".to_string(),
-            versions: Versions {
-                stable: "0.1.0".to_string(),
-            },
-            dependencies: Vec::new(),
-            bottle: Bottle {
-                stable: BottleStable { files, rebuild: 0 },
-            },
-            revision: 0,
-            keg_only: KegOnly::default(),
-            keg_only_reason: None,
-            build_dependencies: Vec::new(),
-            urls: None,
-            ruby_source_path: None,
-            ruby_source_checksum: None,
-            uses_from_macos: Vec::new(),
-            requirements: Vec::new(),
-            variations: None,
-        };
+        let formula = formula_with_files("linuxonly", files);
 
-        let err = select_bottle(&formula).unwrap_err();
+        let err = select_bottle_with_version(&formula, Some(15)).unwrap_err();
+        assert!(matches!(err, Error::UnsupportedBottle { .. }));
+        assert!(err.to_string().contains("x86_64_linux"));
+    }
+
+    #[test]
+    fn errors_when_no_bottles_at_all() {
+        let formula = formula_with_files("nobottle", BTreeMap::new());
+
+        let err = select_bottle_with_version(&formula, Some(15)).unwrap_err();
         assert!(matches!(
             err,
-            Error::UnsupportedBottle { name } if name == "legacy"
+            Error::UnsupportedBottle { ref available, .. } if available.is_empty()
         ));
+        assert!(err.to_string().contains("no pre-built bottles"));
+    }
+
+    #[test]
+    fn errors_when_arm64_bottle_requires_newer_macos() {
+        let mut files = BTreeMap::new();
+        files.insert(
+            "arm64_tahoe".to_string(),
+            bottle_file("https://example.com/tahoe.tar.gz", &"a".repeat(64)),
+        );
+
+        let formula = formula_with_files("toonew", files);
+
+        let err = select_bottle_with_version(&formula, Some(13)).unwrap_err();
+        assert!(matches!(err, Error::UnsupportedBottle { .. }));
+        let message = err.to_string();
+        assert!(message.contains("newer macOS"), "got: {message}");
+    }
+
+    #[test]
+    fn selects_older_arm64_bottle_on_newer_macos() {
+        let mut files = BTreeMap::new();
+        files.insert(
+            "arm64_big_sur".to_string(),
+            bottle_file("https://example.com/big_sur.tar.gz", &"a".repeat(64)),
+        );
+
+        let formula = formula_with_files("oldie", files);
+
+        let selected = select_bottle_with_version(&formula, Some(26)).unwrap();
+        assert_eq!(selected.tag, "arm64_big_sur");
     }
 
     #[test]
     fn compatible_codenames_on_sequoia_excludes_tahoe() {
         let codenames = compatible_codenames(Some(15));
-        assert_eq!(codenames, vec!["sequoia", "sonoma", "ventura"]);
+        assert_eq!(
+            codenames,
+            vec!["sequoia", "sonoma", "ventura", "monterey", "big_sur"]
+        );
     }
 
     #[test]
     fn compatible_codenames_on_tahoe_includes_all() {
         let codenames = compatible_codenames(Some(26));
-        assert_eq!(codenames, vec!["tahoe", "sequoia", "sonoma", "ventura"]);
+        assert_eq!(codenames, MACOS_CODENAMES_NEWEST_FIRST);
     }
 
     #[test]
-    fn compatible_codenames_on_sonoma_excludes_newer() {
-        let codenames = compatible_codenames(Some(14));
-        assert_eq!(codenames, vec!["sonoma", "ventura"]);
-    }
-
-    #[test]
-    fn compatible_codenames_on_ventura_returns_only_ventura() {
+    fn compatible_codenames_on_ventura_excludes_newer() {
         let codenames = compatible_codenames(Some(13));
-        assert_eq!(codenames, vec!["ventura"]);
+        assert_eq!(codenames, vec!["ventura", "monterey", "big_sur"]);
     }
 
     #[test]
-    fn compatible_codenames_unknown_version_returns_all() {
+    fn compatible_codenames_future_version_returns_all() {
         let codenames = compatible_codenames(Some(99));
-        assert_eq!(codenames, vec!["tahoe", "sequoia", "sonoma", "ventura"]);
+        assert_eq!(codenames, MACOS_CODENAMES_NEWEST_FIRST);
     }
 
     #[test]
     fn compatible_codenames_none_returns_all() {
         let codenames = compatible_codenames(None);
-        assert_eq!(codenames, vec!["tahoe", "sequoia", "sonoma", "ventura"]);
+        assert_eq!(codenames, MACOS_CODENAMES_NEWEST_FIRST);
     }
 
     #[test]
-    #[cfg(target_os = "macos")]
     fn sequoia_user_skips_tahoe_bottle() {
         let mut files = BTreeMap::new();
         files.insert(
             "arm64_tahoe".to_string(),
-            BottleFile {
-                url: "https://example.com/tahoe.tar.gz".to_string(),
-                sha256: "aaaa".repeat(16),
-            },
+            bottle_file("https://example.com/tahoe.tar.gz", &"aaaa".repeat(16)),
         );
         files.insert(
             "arm64_sequoia".to_string(),
-            BottleFile {
-                url: "https://example.com/sequoia.tar.gz".to_string(),
-                sha256: "bbbb".repeat(16),
-            },
+            bottle_file("https://example.com/sequoia.tar.gz", &"bbbb".repeat(16)),
         );
 
-        let formula = Formula {
-            name: "libpq".to_string(),
-            versions: Versions {
-                stable: "18.3".to_string(),
-            },
-            dependencies: Vec::new(),
-            bottle: Bottle {
-                stable: BottleStable { files, rebuild: 0 },
-            },
-            revision: 0,
-            keg_only: KegOnly::default(),
-            keg_only_reason: None,
-            build_dependencies: Vec::new(),
-            urls: None,
-            ruby_source_path: None,
-            ruby_source_checksum: None,
-            uses_from_macos: Vec::new(),
-            requirements: Vec::new(),
-            variations: None,
-        };
+        let formula = formula_with_files("libpq", files);
 
         let selected = select_bottle_with_version(&formula, Some(15)).unwrap();
-
-        #[cfg(target_arch = "aarch64")]
         assert_eq!(selected.tag, "arm64_sequoia");
-
-        #[cfg(target_arch = "x86_64")]
-        assert_eq!(selected.tag, "all");
     }
 
     #[test]
-    #[cfg(target_os = "macos")]
     fn tahoe_user_picks_tahoe_bottle() {
         let mut files = BTreeMap::new();
         files.insert(
             "arm64_tahoe".to_string(),
-            BottleFile {
-                url: "https://example.com/tahoe.tar.gz".to_string(),
-                sha256: "aaaa".repeat(16),
-            },
+            bottle_file("https://example.com/tahoe.tar.gz", &"aaaa".repeat(16)),
         );
         files.insert(
             "arm64_sequoia".to_string(),
-            BottleFile {
-                url: "https://example.com/sequoia.tar.gz".to_string(),
-                sha256: "bbbb".repeat(16),
-            },
+            bottle_file("https://example.com/sequoia.tar.gz", &"bbbb".repeat(16)),
         );
 
-        let formula = Formula {
-            name: "libpq".to_string(),
-            versions: Versions {
-                stable: "18.3".to_string(),
-            },
-            dependencies: Vec::new(),
-            bottle: Bottle {
-                stable: BottleStable { files, rebuild: 0 },
-            },
-            revision: 0,
-            keg_only: KegOnly::default(),
-            keg_only_reason: None,
-            build_dependencies: Vec::new(),
-            urls: None,
-            ruby_source_path: None,
-            ruby_source_checksum: None,
-            uses_from_macos: Vec::new(),
-            requirements: Vec::new(),
-            variations: None,
-        };
+        let formula = formula_with_files("libpq", files);
 
         let selected = select_bottle_with_version(&formula, Some(26)).unwrap();
-
-        #[cfg(target_arch = "aarch64")]
         assert_eq!(selected.tag, "arm64_tahoe");
-
-        #[cfg(target_arch = "x86_64")]
-        assert_eq!(selected.tag, "all");
     }
 }

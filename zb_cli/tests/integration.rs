@@ -113,7 +113,6 @@ fn assert_no_installed_symlinks(dir: &std::path::Path) {
 
 #[test]
 #[ignore = "integration test"]
-#[cfg(target_os = "macos")] // GitHub Actions linux runner needs additional X11/XCB deps
 fn test_ffmpeg_formula() {
     let t = TestEnv::new();
 
