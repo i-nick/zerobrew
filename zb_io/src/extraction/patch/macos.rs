@@ -10,6 +10,24 @@ const HOMEBREW_PREFIXES: &[&str] = &[
     "/home/linuxbrew/.linuxbrew",
 ];
 
+/// Check whether a file starts with a Mach-O (or universal binary) magic
+/// number, reading only the first four bytes.
+fn is_macho_file(path: &Path) -> bool {
+    let mut file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut magic_bytes = [0u8; 4];
+    if std::io::Read::read_exact(&mut file, &mut magic_bytes).is_err() {
+        return false;
+    }
+    let magic = u32::from_be_bytes(magic_bytes);
+    matches!(
+        magic,
+        0xfeedface | 0xfeedfacf | 0xcafebabe | 0xcefaedfe | 0xcffaedfe
+    )
+}
+
 /// Patch hardcoded Homebrew paths in text files.
 fn patch_text_file_strings(path: &Path, new_prefix: &str, new_cellar: &str) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;
@@ -273,28 +291,20 @@ pub fn patch_homebrew_placeholders(
     let version_pattern = format!(r"(/Cellar/{}/)([^/]+)(/)", regex::escape(pkg_name));
     let version_regex = Regex::new(&version_pattern).ok();
 
-    // Collect all Mach-O files first (skip symlinks to avoid double-processing)
-    let macho_files: Vec<PathBuf> = walkdir::WalkDir::new(keg_path)
+    // Walk the keg once (skip symlinks to avoid double-processing) and
+    // classify files by their magic bytes.
+    let all_files: Vec<PathBuf> = walkdir::WalkDir::new(keg_path)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            // Skip symlinks - only process actual files
-            e.file_type().is_file()
-        })
-        .filter(|e| {
-            if let Ok(data) = fs::read(e.path())
-                && data.len() >= 4
-            {
-                let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
-                return matches!(
-                    magic,
-                    0xfeedface | 0xfeedfacf | 0xcafebabe | 0xcefaedfe | 0xcffaedfe
-                );
-            }
-            false
-        })
+        .filter(|e| e.file_type().is_file())
         .map(|e| e.path().to_path_buf())
+        .collect();
+
+    let macho_files: Vec<PathBuf> = all_files
+        .iter()
+        .filter(|path| is_macho_file(path))
+        .cloned()
         .collect();
 
     let patch_failures = AtomicUsize::new(0);
@@ -319,15 +329,7 @@ pub fn patch_homebrew_placeholders(
     }
 
     // Second pass: patch text files
-    let text_files: Vec<PathBuf> = walkdir::WalkDir::new(keg_path)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .collect();
-
-    text_files.par_iter().for_each(|path| {
+    all_files.par_iter().for_each(|path| {
         let _ = patch_text_file_strings(path, &prefix_str, &cellar_str);
     });
 
@@ -390,33 +392,29 @@ pub fn patch_homebrew_placeholders(
             }
         }
 
-        let mut patched_any = false;
+        // Collect all load command edits so install_name_tool runs at most
+        // once per file instead of once per dependency.
+        let mut tool_args: Vec<String> = Vec::new();
 
-        // Get and patch library dependencies (-L)
+        // Library dependencies (-L); the first line is the file name itself.
         if let Ok(output) = Command::new("otool")
             .args(["-L", &path.to_string_lossy()])
             .output()
             && output.status.success()
         {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                let line = line.trim();
+            for line in stdout.lines().skip(1) {
                 if let Some(old_path) = line.split_whitespace().next()
                     && let Some(new_path) = patch_path(old_path)
                 {
-                    let result = Command::new("install_name_tool")
-                        .args(["-change", old_path, &new_path, &path.to_string_lossy()])
-                        .output();
-                    if result.is_ok() {
-                        patched_any = true;
-                    } else {
-                        patch_failures.fetch_add(1, Ordering::Relaxed);
-                    }
+                    tool_args.push("-change".to_string());
+                    tool_args.push(old_path.to_string());
+                    tool_args.push(new_path);
                 }
             }
         }
 
-        // Get and patch install name ID (-D)
+        // Install name ID (-D); the first line is the file name itself.
         if let Ok(output) = Command::new("otool")
             .args(["-D", &path.to_string_lossy()])
             .output()
@@ -424,29 +422,46 @@ pub fn patch_homebrew_placeholders(
         {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines().skip(1) {
-                // Skip first line (filename)
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
                 }
                 if let Some(new_id) = patch_path(line) {
-                    let result = Command::new("install_name_tool")
-                        .args(["-id", &new_id, &path.to_string_lossy()])
-                        .output();
-                    if result.is_ok() {
-                        patched_any = true;
-                    } else {
-                        patch_failures.fetch_add(1, Ordering::Relaxed);
-                    }
+                    tool_args.push("-id".to_string());
+                    tool_args.push(new_id);
                 }
             }
         }
 
-        // Re-sign if we patched anything (patching invalidates code signature)
-        if patched_any {
-            let _ = Command::new("codesign")
-                .args(["--force", "--sign", "-", &path.to_string_lossy()])
-                .output();
+        if !tool_args.is_empty() {
+            let patched = match Command::new("install_name_tool")
+                .args(&tool_args)
+                .arg(path)
+                .output()
+            {
+                Ok(output) if output.status.success() => true,
+                Ok(output) => {
+                    warn!(
+                        path = %path.display(),
+                        error = %String::from_utf8_lossy(&output.stderr),
+                        "install_name_tool failed to patch load commands"
+                    );
+                    patch_failures.fetch_add(1, Ordering::Relaxed);
+                    false
+                }
+                Err(e) => {
+                    warn!(path = %path.display(), error = %e, "failed to run install_name_tool");
+                    patch_failures.fetch_add(1, Ordering::Relaxed);
+                    false
+                }
+            };
+
+            // Re-sign if we patched anything (patching invalidates code signature)
+            if patched {
+                let _ = Command::new("codesign")
+                    .args(["--force", "--sign", "-", &path.to_string_lossy()])
+                    .output();
+            }
         }
 
         // Restore original permissions
@@ -504,17 +519,7 @@ pub fn codesign_and_strip_xattrs(keg_path: &Path) -> Result<(), Error> {
 
     // Only process files that need signing
     bin_files.par_iter().for_each(|path| {
-        // Quick check: is it a Mach-O?
-        let data = match fs::read(path) {
-            Ok(d) if d.len() >= 4 => d,
-            _ => return,
-        };
-        let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
-        let is_macho = matches!(
-            magic,
-            0xfeedface | 0xfeedfacf | 0xcafebabe | 0xcefaedfe | 0xcffaedfe
-        );
-        if !is_macho {
+        if !is_macho_file(path) {
             return;
         }
 

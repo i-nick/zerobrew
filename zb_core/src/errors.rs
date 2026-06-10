@@ -9,26 +9,75 @@ pub struct ConflictedLink {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
-    UnsupportedBottle { name: String },
-    ChecksumMismatch { expected: String, actual: String },
-    LinkConflict { conflicts: Vec<ConflictedLink> },
-    StoreCorruption { message: String },
-    NetworkFailure { message: String },
-    MissingFormula { name: String },
-    UnsupportedTap { name: String },
-    UnsupportedFormula { name: String, reason: String },
-    DependencyCycle { cycle: Vec<String> },
-    NotInstalled { name: String },
-    FileError { message: String },
-    InvalidArgument { message: String },
-    ExecutionError { message: String },
+    UnsupportedBottle {
+        name: String,
+        available: Vec<String>,
+    },
+    ChecksumMismatch {
+        expected: String,
+        actual: String,
+    },
+    LinkConflict {
+        conflicts: Vec<ConflictedLink>,
+    },
+    StoreCorruption {
+        message: String,
+    },
+    NetworkFailure {
+        message: String,
+    },
+    MissingFormula {
+        name: String,
+    },
+    UnsupportedTap {
+        name: String,
+    },
+    UnsupportedFormula {
+        name: String,
+        reason: String,
+    },
+    DependencyCycle {
+        cycle: Vec<String>,
+    },
+    NotInstalled {
+        name: String,
+    },
+    FileError {
+        message: String,
+    },
+    InvalidArgument {
+        message: String,
+    },
+    ExecutionError {
+        message: String,
+    },
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::UnsupportedBottle { name } => {
-                write!(f, "unsupported bottle for formula '{name}'")
+            Error::UnsupportedBottle { name, available } => {
+                if available.is_empty() {
+                    write!(
+                        f,
+                        "formula '{name}' provides no pre-built bottles; \
+                         it may need to be built from source"
+                    )
+                } else if available.iter().any(|tag| tag.starts_with("arm64_")) {
+                    write!(
+                        f,
+                        "formula '{name}' has Apple Silicon bottles only for newer macOS \
+                         releases (available: {}); upgrade macOS to install it",
+                        available.join(", ")
+                    )
+                } else {
+                    write!(
+                        f,
+                        "formula '{name}' has no Apple Silicon (arm64) bottle \
+                         (available: {}); it is likely not supported on Apple Silicon Macs",
+                        available.join(", ")
+                    )
+                }
             }
             Error::ChecksumMismatch { expected, actual } => {
                 write!(f, "checksum mismatch (expected {expected}, got {actual})")
@@ -101,8 +150,12 @@ mod tests {
     fn unsupported_bottle_display_includes_name() {
         let err = Error::UnsupportedBottle {
             name: "libheif".to_string(),
+            available: vec!["x86_64_linux".to_string()],
         };
 
-        assert!(err.to_string().contains("libheif"));
+        let message = err.to_string();
+        assert!(message.contains("libheif"));
+        assert!(message.contains("x86_64_linux"));
+        assert!(message.contains("Apple Silicon"));
     }
 }

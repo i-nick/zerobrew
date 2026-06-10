@@ -2,10 +2,7 @@ pub mod bottle;
 pub mod resolve;
 pub mod types;
 
-pub use bottle::{SelectedBottle, compatible_codenames, select_bottle};
-
-#[cfg(target_os = "macos")]
-pub use bottle::macos_major_version;
+pub use bottle::{SelectedBottle, compatible_codenames, macos_major_version, select_bottle};
 pub use resolve::resolve_closure;
 pub use types::{
     Bottle, BottleFile, BottleStable, Formula, FormulaUrls, KegOnly, KegOnlyReason,

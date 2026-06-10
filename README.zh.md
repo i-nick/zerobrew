@@ -16,7 +16,7 @@
 
 <img alt="zerobrew demo" src="./assets/zb-demo.gif" />
 
-<p><strong>zerobrew 为 macOS 和 Linux 上的 Homebrew 软件包带来了类似 uv 的架构。</strong></p>
+<p><strong>zerobrew 为 Apple 芯片 Mac 上的 Homebrew 软件包带来了类似 uv 的架构。</strong></p>
 
 </div>
 

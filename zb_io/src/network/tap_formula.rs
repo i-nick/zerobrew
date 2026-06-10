@@ -99,45 +99,30 @@ pub(crate) fn preprocess_tap_source(source: &str) -> String {
     resolve_version_interpolation(&resolved)
 }
 
-/// Returns `Some(true)` when the line opens a platform block that matches the
-/// current compile target, `Some(false)` when it opens one that does not
-/// match, and `None` when the line is not a platform block at all.
+/// Returns `Some(true)` when the line opens a platform block that matches
+/// macOS on Apple Silicon (the only supported target), `Some(false)` when it
+/// opens one that does not match, and `None` when the line is not a platform
+/// block at all.
 fn platform_block_matches(trimmed: &str) -> Option<bool> {
     let cap = ON_PLATFORM_RE.captures(trimmed)?;
     let platform = cap.get(1)?.as_str();
-    Some(match platform {
-        "macos" => cfg!(target_os = "macos"),
-        "linux" => cfg!(target_os = "linux"),
-        "arm" => cfg!(target_arch = "aarch64"),
-        "intel" => cfg!(target_arch = "x86_64"),
-        _ => false,
-    })
+    Some(matches!(platform, "macos" | "arm"))
 }
 
-/// Returns `Some(true)` when the line is an `if Hardware::CPU.{arm,intel}?`
-/// conditional that matches the current architecture, `Some(false)` when it
-/// does not match, and `None` when the line is not an arch conditional.
+/// Returns `Some(true)` when the line is an `if Hardware::CPU.arm?`
+/// conditional, `Some(false)` for `if Hardware::CPU.intel?`, and `None` when
+/// the line is not an arch conditional.
 fn arch_conditional_matches(trimmed: &str) -> Option<bool> {
     let cap = HW_CPU_RE.captures(trimmed)?;
-    let arch = cap.get(1)?.as_str();
-    Some(match arch {
-        "arm" => cfg!(target_arch = "aarch64"),
-        "intel" => cfg!(target_arch = "x86_64"),
-        _ => false,
-    })
+    Some(cap.get(1)?.as_str() == "arm")
 }
 
-/// Returns `Some(true)` when the line is an `elsif Hardware::CPU.{arm,intel}?`
-/// conditional that matches the current architecture, `Some(false)` when it
-/// does not match, and `None` when the line is not an elsif arch conditional.
+/// Returns `Some(true)` when the line is an `elsif Hardware::CPU.arm?`
+/// conditional, `Some(false)` for `elsif Hardware::CPU.intel?`, and `None`
+/// when the line is not an elsif arch conditional.
 fn arch_conditional_matches_elsif(trimmed: &str) -> Option<bool> {
     let cap = ELSIF_HW_CPU_RE.captures(trimmed)?;
-    let arch = cap.get(1)?.as_str();
-    Some(match arch {
-        "arm" => cfg!(target_arch = "aarch64"),
-        "intel" => cfg!(target_arch = "x86_64"),
-        _ => false,
-    })
+    Some(cap.get(1)?.as_str() == "arm")
 }
 
 /// Counts how many Ruby blocks are opened by a single source line (via `do`
@@ -1094,34 +1079,20 @@ end
             .and_then(|u| u.stable.as_ref())
             .expect("stable source url should be parsed");
 
-        #[cfg(target_os = "macos")]
-        {
-            assert_eq!(stable.url, "https://example.com/sag_darwin.tar.gz");
-            assert_eq!(
-                stable.checksum.as_deref(),
-                Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-            );
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            assert_eq!(stable.url, "https://example.com/sag_linux.tar.gz");
-            assert_eq!(
-                stable.checksum.as_deref(),
-                Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-            );
-        }
+        assert_eq!(stable.url, "https://example.com/sag_darwin.tar.gz");
+        assert_eq!(
+            stable.checksum.as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
     }
 
     #[test]
     fn resolves_nested_arch_conditional_in_on_platform_block() {
-        #[cfg(target_os = "linux")]
-        {
-            let source = r#"
+        let source = r#"
 class Sag < Formula
   version "0.2.2"
 
-  on_linux do
+  on_macos do
     if Hardware::CPU.arm?
       url "https://example.com/sag_arm.tar.gz"
       sha256 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1134,30 +1105,20 @@ class Sag < Formula
 end
 "#;
 
-            let spec = TapFormulaRef {
-                owner: "steipete".to_string(),
-                repo: "tap".to_string(),
-                formula: "sag".to_string(),
-            };
-            let formula = parse_tap_formula_ruby(&spec, source).unwrap();
-            let stable = formula
-                .urls
-                .as_ref()
-                .and_then(|u| u.stable.as_ref())
-                .expect("stable source url should be parsed");
+        let spec = TapFormulaRef {
+            owner: "steipete".to_string(),
+            repo: "tap".to_string(),
+            formula: "sag".to_string(),
+        };
+        let formula = parse_tap_formula_ruby(&spec, source).unwrap();
+        let stable = formula
+            .urls
+            .as_ref()
+            .and_then(|u| u.stable.as_ref())
+            .expect("stable source url should be parsed");
 
-            #[cfg(target_arch = "aarch64")]
-            {
-                assert_eq!(stable.url, "https://example.com/sag_arm.tar.gz");
-                assert_eq!(formula.build_dependencies, vec!["go".to_string()]);
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            {
-                assert_eq!(stable.url, "https://example.com/sag_x86.tar.gz");
-                assert!(formula.build_dependencies.is_empty());
-            }
-        }
+        assert_eq!(stable.url, "https://example.com/sag_arm.tar.gz");
+        assert_eq!(formula.build_dependencies, vec!["go".to_string()]);
     }
 
     #[test]
@@ -1256,31 +1217,10 @@ end
             stable.url
         );
 
-        #[cfg(target_os = "macos")]
-        {
-            assert_eq!(
-                stable.url,
-                "https://github.com/steipete/sag/releases/download/v0.2.2/sag_0.2.2_darwin_universal.tar.gz"
-            );
-        }
-
-        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        {
-            assert_eq!(
-                stable.url,
-                "https://github.com/steipete/sag/releases/download/v0.2.2/sag_0.2.2_linux_amd64.tar.gz"
-            );
-            assert!(formula.build_dependencies.is_empty());
-        }
-
-        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-        {
-            assert_eq!(
-                stable.url,
-                "https://github.com/steipete/sag/archive/refs/tags/v0.2.2.tar.gz"
-            );
-            assert_eq!(formula.build_dependencies, vec!["go".to_string()]);
-        }
+        assert_eq!(
+            stable.url,
+            "https://github.com/steipete/sag/releases/download/v0.2.2/sag_0.2.2_darwin_universal.tar.gz"
+        );
     }
 
     #[test]
@@ -1344,11 +1284,7 @@ end
             .and_then(|u| u.stable.as_ref())
             .expect("stable source url should be parsed");
 
-        #[cfg(target_arch = "aarch64")]
         assert_eq!(stable.url, "https://example.com/example_arm.tar.gz");
-
-        #[cfg(target_arch = "x86_64")]
-        assert_eq!(stable.url, "https://example.com/example_x86.tar.gz");
     }
 
     #[test]
@@ -1379,16 +1315,7 @@ end
         let formula = parse_tap_formula_ruby(&spec, source).unwrap();
         assert!(formula.dependencies.contains(&"common-dep".to_string()));
 
-        #[cfg(target_os = "macos")]
-        {
-            assert!(formula.dependencies.contains(&"macos-only-dep".to_string()));
-            assert!(!formula.dependencies.contains(&"linux-only-dep".to_string()));
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            assert!(formula.dependencies.contains(&"linux-only-dep".to_string()));
-            assert!(!formula.dependencies.contains(&"macos-only-dep".to_string()));
-        }
+        assert!(formula.dependencies.contains(&"macos-only-dep".to_string()));
+        assert!(!formula.dependencies.contains(&"linux-only-dep".to_string()));
     }
 }

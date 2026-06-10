@@ -11,7 +11,7 @@
 
 <img alt="zerobrew demo" src="./assets/zb-demo.gif" />
 
-<p><strong>zerobrew brings uv-style architecture to Homebrew packages on macOS and Linux.</strong></p>
+<p><strong>zerobrew brings uv-style architecture to Homebrew packages on Apple Silicon Macs.</strong></p>
 
 </div>
 

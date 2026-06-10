@@ -85,13 +85,13 @@ pub async fn execute(
         }
 
         let lib_path = prefix_path.join("lib");
-        if let Ok(existing_ld_path) = std::env::var("LD_LIBRARY_PATH") {
+        if let Ok(existing_fallback) = std::env::var("DYLD_FALLBACK_LIBRARY_PATH") {
             cmd.env(
-                "LD_LIBRARY_PATH",
-                format!("{}:{}", lib_path.display(), existing_ld_path),
+                "DYLD_FALLBACK_LIBRARY_PATH",
+                format!("{}:{}", lib_path.display(), existing_fallback),
             );
         } else {
-            cmd.env("LD_LIBRARY_PATH", lib_path);
+            cmd.env("DYLD_FALLBACK_LIBRARY_PATH", lib_path);
         }
     }
 
@@ -139,20 +139,12 @@ fn select_executable(bin_dir: &Path, preferred_name: &str) -> Result<PathBuf, zb
 }
 
 fn is_executable_file(path: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        path.is_file()
-            && path
-                .metadata()
-                .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
-                .unwrap_or(false)
-    }
-
-    #[cfg(not(unix))]
-    {
-        path.is_file()
-    }
+    use std::os::unix::fs::PermissionsExt;
+    path.is_file()
+        && path
+            .metadata()
+            .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
 }
 
 fn detect_runtime_prefix(bin_path: &Path) -> Option<PathBuf> {
@@ -222,13 +214,7 @@ mod tests {
     }
 
     fn get_test_bottle_tag() -> &'static str {
-        if cfg!(target_os = "linux") {
-            "x86_64_linux"
-        } else if cfg!(target_arch = "x86_64") {
-            "sonoma"
-        } else {
-            "arm64_sonoma"
-        }
+        "arm64_sonoma"
     }
 
     #[tokio::test]
@@ -477,7 +463,6 @@ mod tests {
         let rg = bin_dir.join("rg");
         fs::write(&rg, "#!/bin/sh\n").unwrap();
 
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mut permissions = fs::metadata(&rg).unwrap().permissions();
@@ -497,7 +482,6 @@ mod tests {
         for name in ["foo", "bar"] {
             let path = bin_dir.join(name);
             fs::write(&path, "#!/bin/sh\n").unwrap();
-            #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 let mut permissions = fs::metadata(&path).unwrap().permissions();

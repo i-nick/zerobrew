@@ -176,7 +176,6 @@ fn extract_zip_archive(path: &Path, dest_dir: &Path) -> Result<(), Error> {
                 .map_err(Error::store("failed to create output parent directory"))?;
         }
 
-        #[cfg(unix)]
         if entry.unix_mode().is_some_and(is_symlink_mode) {
             extract_zip_symlink(&mut entry, &raw_path, &out_path, dest_dir)?;
             continue;
@@ -187,7 +186,6 @@ fn extract_zip_archive(path: &Path, dest_dir: &Path) -> Result<(), Error> {
         std::io::copy(&mut entry, &mut output)
             .map_err(Error::store("failed to extract zip entry"))?;
 
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             if let Some(mode) = entry.unix_mode() {
@@ -201,12 +199,10 @@ fn extract_zip_archive(path: &Path, dest_dir: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-#[cfg(unix)]
 fn is_symlink_mode(mode: u32) -> bool {
     mode & 0o170000 == 0o120000
 }
 
-#[cfg(unix)]
 fn extract_zip_symlink<R: Read>(
     entry: &mut zip::read::ZipFile<'_, R>,
     raw_path: &Path,
@@ -370,13 +366,6 @@ fn normalize_path(path: &Path) -> PathBuf {
     components.iter().collect()
 }
 
-/// Extract a tarball from a reader (assumes gzip compression).
-/// For file-based extraction with auto-detection, use `extract_tarball` instead.
-pub fn extract_tarball_from_reader<R: Read>(reader: R, dest_dir: &Path) -> Result<(), Error> {
-    let decoder = GzDecoder::new(reader);
-    extract_tar_archive(decoder, dest_dir)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,7 +449,6 @@ mod tests {
         zip.finish().unwrap().into_inner()
     }
 
-    #[cfg(unix)]
     fn create_test_zip_with_symlink(files: Vec<(&str, &[u8])>, symlink: (&str, &str)) -> Vec<u8> {
         use zip::write::SimpleFileOptions;
 
@@ -608,7 +596,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn preserves_zip_symlink() {
         let tmp = TempDir::new().unwrap();
@@ -639,7 +626,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn rejects_zip_symlink_that_escapes_destination() {
         let tmp = TempDir::new().unwrap();

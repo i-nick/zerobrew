@@ -476,7 +476,6 @@ mod test_support {
         format!("{:x}", hasher.finalize())
     }
 
-    #[cfg(target_os = "macos")]
     pub fn create_cask_dmg(app_name: &str, binary_relative_path: &str, contents: &str) -> Vec<u8> {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
@@ -510,13 +509,7 @@ mod test_support {
     }
 
     pub fn get_test_bottle_tag() -> &'static str {
-        if cfg!(target_os = "linux") {
-            "x86_64_linux"
-        } else if cfg!(target_arch = "x86_64") {
-            "sonoma"
-        } else {
-            "arm64_sonoma"
-        }
+        "arm64_sonoma"
     }
 }
 

@@ -1,23 +1,18 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-
-#[cfg(target_os = "macos")]
 use std::process::Command;
 
 use tracing::warn;
 use zb_core::{Error, Formula, InstallMethod, formula_token};
 
 use crate::cellar::link::Linker;
-use crate::cellar::materialize::Cellar;
-#[cfg(target_os = "macos")]
-use crate::cellar::materialize::copy_dir_copy_only;
+use crate::cellar::materialize::{Cellar, copy_dir_copy_only};
 use crate::installer::cask::resolve_cask;
 use crate::network::download::{DownloadProgressCallback, DownloadRequest, DownloadResult};
 use crate::progress::InstallProgress;
 use crate::storage::db::KegFileRecord;
 
-#[cfg(target_os = "macos")]
 use tempfile::TempDir;
 
 use super::{Installer, IsolatedLinkReason, LinkOutcome, MAX_CORRUPTION_RETRIES, PlannedInstall};
@@ -379,26 +374,14 @@ impl Installer {
         );
 
         if should_mount_dmg_directly(&cask) {
-            #[cfg(target_os = "macos")]
-            {
-                let mounted = MountedDmg::attach(&blob_path, &cask)?;
-                install_cask_from_root(
-                    mounted.path(),
-                    &keg_path,
-                    &cask,
-                    &previous_external_paths,
-                    &mut cleanup,
-                )?;
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                return Err(Error::InvalidArgument {
-                    message: format!(
-                        "cask '{}' installs app bundles, which are only supported on macOS",
-                        cask.token
-                    ),
-                });
-            }
+            let mounted = MountedDmg::attach(&blob_path, &cask)?;
+            install_cask_from_root(
+                mounted.path(),
+                &keg_path,
+                &cask,
+                &previous_external_paths,
+                &mut cleanup,
+            )?;
         } else if crate::extraction::is_archive(&blob_path)? {
             let extracted = self.store.ensure_entry(&cask.sha256, &blob_path)?;
             install_cask_from_root(
@@ -409,26 +392,14 @@ impl Installer {
                 &mut cleanup,
             )?;
         } else if has_app_backed_payload(&cask) {
-            #[cfg(target_os = "macos")]
-            {
-                let mounted = MountedDmg::attach(&blob_path, &cask)?;
-                install_cask_from_root(
-                    mounted.path(),
-                    &keg_path,
-                    &cask,
-                    &previous_external_paths,
-                    &mut cleanup,
-                )?;
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                return Err(Error::InvalidArgument {
-                    message: format!(
-                        "cask '{}' installs app bundles, which are only supported on macOS",
-                        cask.token
-                    ),
-                });
-            }
+            let mounted = MountedDmg::attach(&blob_path, &cask)?;
+            install_cask_from_root(
+                mounted.path(),
+                &keg_path,
+                &cask,
+                &previous_external_paths,
+                &mut cleanup,
+            )?;
         } else {
             stage_raw_cask_binary(&blob_path, &keg_path, &cask)?;
         }
@@ -605,7 +576,6 @@ impl<'a> FailedInstallGuard<'a> {
         self.armed = false;
     }
 
-    #[cfg(target_os = "macos")]
     fn track_external_path(&mut self, path: PathBuf) {
         self.external_records.push(crate::cellar::link::LinkedFile {
             link_path: path.clone(),
@@ -661,20 +631,7 @@ fn install_cask_from_root(
     cleanup: &mut FailedInstallGuard<'_>,
 ) -> Result<(), Error> {
     let installed_apps = if has_app_backed_payload(cask) {
-        #[cfg(target_os = "macos")]
-        {
-            install_cask_apps(source_root, cask, previous_external_paths, cleanup)?
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (previous_external_paths, cleanup);
-            Err(Error::InvalidArgument {
-                message: format!(
-                    "cask '{}' installs app bundles, which are only supported on macOS",
-                    cask.token
-                ),
-            })?
-        }
+        install_cask_apps(source_root, cask, previous_external_paths, cleanup)?
     } else {
         HashMap::new()
     };
@@ -682,7 +639,6 @@ fn install_cask_from_root(
     stage_cask_binaries(source_root, keg_path, cask, &installed_apps)
 }
 
-#[cfg(target_os = "macos")]
 fn install_cask_apps(
     source_root: &Path,
     cask: &crate::installer::cask::ResolvedCask,
@@ -728,7 +684,6 @@ fn install_cask_apps(
     Ok(installed_apps)
 }
 
-#[cfg(target_os = "macos")]
 fn install_app_bundle(source: &Path, destination: &Path) -> Result<(), Error> {
     if !source.is_dir() {
         return Err(Error::InvalidArgument {
@@ -811,30 +766,21 @@ fn stage_cask_binaries(
         }
 
         if binary.source.starts_with("$APPDIR/") {
-            #[cfg(unix)]
             std::os::unix::fs::symlink(&source, &target)
                 .map_err(Error::store("failed to stage cask app binary symlink"))?;
-
-            #[cfg(not(unix))]
-            fs::copy(&source, &target).map_err(|e| Error::StoreCorruption {
-                message: format!("failed to stage cask binary '{}': {e}", binary.target),
-            })?;
         } else {
             fs::copy(&source, &target).map_err(|e| Error::StoreCorruption {
                 message: format!("failed to stage cask binary '{}': {e}", binary.target),
             })?;
 
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut perms = fs::metadata(&target)
-                    .map_err(Error::store("failed to read staged cask binary metadata"))?
-                    .permissions();
-                if perms.mode() & 0o111 == 0 {
-                    perms.set_mode(0o755);
-                    fs::set_permissions(&target, perms)
-                        .map_err(Error::store("failed to make staged cask binary executable"))?;
-                }
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&target)
+                .map_err(Error::store("failed to read staged cask binary metadata"))?
+                .permissions();
+            if perms.mode() & 0o111 == 0 {
+                perms.set_mode(0o755);
+                fs::set_permissions(&target, perms)
+                    .map_err(Error::store("failed to make staged cask binary executable"))?;
             }
         }
     }
@@ -870,12 +816,9 @@ fn stage_raw_cask_binary(
         message: format!("failed to stage cask binary '{}': {e}", binary.target),
     })?;
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
-            .map_err(Error::store("failed to make staged cask binary executable"))?;
-    }
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+        .map_err(Error::store("failed to make staged cask binary executable"))?;
 
     Ok(())
 }
@@ -993,7 +936,6 @@ fn ensure_safe_relative_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
 fn file_name(path: &str) -> Result<String, Error> {
     Path::new(path)
         .file_name()
@@ -1020,7 +962,6 @@ fn remove_path(path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
 fn user_applications_dir() -> Result<PathBuf, Error> {
     let home = std::env::var_os("HOME").ok_or_else(|| Error::InvalidArgument {
         message: "HOME must be set to install app-backed casks".to_string(),
@@ -1028,13 +969,11 @@ fn user_applications_dir() -> Result<PathBuf, Error> {
     Ok(PathBuf::from(home).join("Applications"))
 }
 
-#[cfg(target_os = "macos")]
 struct MountedDmg {
     mount_dir: TempDir,
     attached: bool,
 }
 
-#[cfg(target_os = "macos")]
 impl MountedDmg {
     fn attach(
         blob_path: &Path,
@@ -1076,7 +1015,6 @@ impl MountedDmg {
     }
 }
 
-#[cfg(target_os = "macos")]
 impl Drop for MountedDmg {
     fn drop(&mut self) {
         if !self.attached {
@@ -1102,20 +1040,16 @@ impl Drop for MountedDmg {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(target_os = "macos")]
     use std::ffi::OsString;
     use std::fs;
-    #[cfg(target_os = "macos")]
     use std::sync::LazyLock;
 
     use tempfile::TempDir;
-    #[cfg(target_os = "macos")]
     use tokio::sync::Mutex;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use crate::cellar::Cellar;
-    #[cfg(target_os = "macos")]
     use crate::installer::install::test_support::create_cask_dmg;
     use crate::installer::install::test_support::sha256_hex;
     use crate::network::api::ApiClient;
@@ -1126,7 +1060,6 @@ mod tests {
 
     use super::*;
 
-    #[cfg(target_os = "macos")]
     static HOME_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
@@ -1154,12 +1087,10 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     struct HomeOverride {
         previous: Option<OsString>,
     }
 
-    #[cfg(target_os = "macos")]
     impl HomeOverride {
         fn set(path: &Path) -> Self {
             let previous = std::env::var_os("HOME");
@@ -1170,7 +1101,6 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     impl Drop for HomeOverride {
         fn drop(&mut self) {
             unsafe {
@@ -1282,7 +1212,6 @@ mod tests {
             "#!/bin/sh\necho hello"
         );
 
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = fs::metadata(&target).unwrap().permissions().mode();
@@ -1428,7 +1357,6 @@ mod tests {
         assert!(err.to_string().contains("preflight-generated wrapper"));
     }
 
-    #[cfg(target_os = "macos")]
     fn cask_json(mock_server_uri: &str, version: &str, sha256: &str) -> String {
         format!(
             r#"{{
@@ -1444,7 +1372,6 @@ mod tests {
         )
     }
 
-    #[cfg(target_os = "macos")]
     fn app_only_cask_json(
         mock_server_uri: &str,
         token: &str,
@@ -1464,7 +1391,6 @@ mod tests {
         .to_string()
     }
 
-    #[cfg(target_os = "macos")]
     fn ghostty_style_cask_json(mock_server_uri: &str, version: &str, sha256: &str) -> String {
         serde_json::json!({
             "token": "ghostty",
@@ -1558,7 +1484,6 @@ end
         assert!(!prefix.join("bin/taptool").exists());
     }
 
-    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn install_cask_dmg_places_app_and_uninstalls_cleanly() {
         let _home_lock = HOME_ENV_LOCK.lock().await;
@@ -1618,7 +1543,6 @@ end
         assert!(!prefix.join("bin/zed").exists());
     }
 
-    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn install_app_only_cask_places_app_without_binary_links() {
         let _home_lock = HOME_ENV_LOCK.lock().await;
@@ -1671,7 +1595,6 @@ end
         assert!(!home.join("Applications/Brave Browser.app").exists());
     }
 
-    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn install_ghostty_style_cask_ignores_extra_artifacts_and_uninstalls_with_zap() {
         let _home_lock = HOME_ENV_LOCK.lock().await;
@@ -1728,7 +1651,6 @@ end
         assert!(!zap_dir.exists());
     }
 
-    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn install_cask_dmg_honors_no_link() {
         let _home_lock = HOME_ENV_LOCK.lock().await;
@@ -1774,7 +1696,6 @@ end
         assert!(root.join("cellar/cask:zed/1.0.0/bin/zed").exists());
     }
 
-    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn reinstall_cask_replaces_owned_app_bundle() {
         let _home_lock = HOME_ENV_LOCK.lock().await;
@@ -1838,7 +1759,6 @@ end
         assert!(contents.contains("second"));
     }
 
-    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn install_cask_overwrites_existing_app_bundle() {
         let _home_lock = HOME_ENV_LOCK.lock().await;

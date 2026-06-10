@@ -61,20 +61,19 @@ trap cleanup EXIT
 ZEROBREW_REPO="https://github.com/i-nick/zerobrew.git"
 ZEROBREW_BIN="$HOME/.local/bin"
 
-if [[ -d "/opt/zerobrew" ]]; then
-    ZEROBREW_ROOT="/opt/zerobrew"
-elif [[ "$(uname -s)" == "Darwin" ]]; then
-    ZEROBREW_ROOT="/opt/zerobrew"
-else
-    XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-    ZEROBREW_ROOT="$XDG_DATA_HOME/zerobrew"
+# zerobrew only supports macOS on Apple Silicon.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+    error_exit "zerobrew only supports macOS on Apple Silicon. Detected OS: $(uname -s)"
 fi
+case "$(uname -m)" in
+arm64 | aarch64) ;;
+*)
+    error_exit "zerobrew only supports Apple Silicon (arm64) Macs. Detected architecture: $(uname -m)"
+    ;;
+esac
 
-if [[ "$(uname -s)" == "Darwin" ]]; then
-    : "${ZEROBREW_PREFIX:=$ZEROBREW_ROOT}"
-else
-    : "${ZEROBREW_PREFIX:=$ZEROBREW_ROOT/prefix}"
-fi
+ZEROBREW_ROOT="/opt/zerobrew"
+: "${ZEROBREW_PREFIX:=$ZEROBREW_ROOT}"
 
 export ZEROBREW_ROOT
 export ZEROBREW_PREFIX
@@ -221,27 +220,7 @@ finalize_installation() {
 
 resolve_release_asset() {
     local binary_name="$1"
-    local os arch
-    os=$(uname -s)
-    arch=$(uname -m)
-
-    case "$os/$arch" in
-    Darwin/arm64 | Darwin/aarch64)
-        echo "${binary_name}-darwin-arm64"
-        ;;
-    Darwin/x86_64 | Darwin/amd64)
-        echo "${binary_name}-darwin-x64"
-        ;;
-    Linux/arm64 | Linux/aarch64)
-        echo "${binary_name}-linux-arm64"
-        ;;
-    Linux/x86_64 | Linux/amd64)
-        echo "${binary_name}-linux-x64"
-        ;;
-    *)
-        return 1
-        ;;
-    esac
+    echo "${binary_name}-darwin-arm64"
 }
 
 download_release_binary() {

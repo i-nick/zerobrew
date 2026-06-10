@@ -61,23 +61,21 @@ pub fn run_init(
     validate_privileged_path(prefix)
         .map_err(|e| InitError::Message(format!("invalid prefix path: {e}")))?;
 
-    // On macOS, warn early if the chosen prefix is too long for Mach-O patching.
-    if cfg!(target_os = "macos") {
-        let prefix_str = prefix.to_string_lossy();
-        if prefix_str.len() > MAX_PREFIX_LEN_MACOS {
-            ui.note(format!(
-                "Prefix \"{}\" ({} chars) exceeds the macOS Mach-O limit of {} characters.",
-                prefix_str,
-                prefix_str.len(),
-                MAX_PREFIX_LEN_MACOS,
-            ))?;
-            ui.info("Path-sensitive packages (e.g. git, curl) will fail to install.")?;
-            ui.info(format!(
-                "Consider a shorter prefix, e.g.: {}",
-                style("zb init <root> /opt/zerobrew").cyan(),
-            ))?;
-            ui.blank_line()?;
-        }
+    // Warn early if the chosen prefix is too long for Mach-O patching.
+    let prefix_str = prefix.to_string_lossy();
+    if prefix_str.len() > MAX_PREFIX_LEN_MACOS {
+        ui.note(format!(
+            "Prefix \"{}\" ({} chars) exceeds the macOS Mach-O limit of {} characters.",
+            prefix_str,
+            prefix_str.len(),
+            MAX_PREFIX_LEN_MACOS,
+        ))?;
+        ui.info("Path-sensitive packages (e.g. git, curl) will fail to install.")?;
+        ui.info(format!(
+            "Consider a shorter prefix, e.g.: {}",
+            style("zb init <root> /opt/zerobrew").cyan(),
+        ))?;
+        ui.blank_line()?;
     }
 
     ui.heading("Initializing zerobrew...")?;

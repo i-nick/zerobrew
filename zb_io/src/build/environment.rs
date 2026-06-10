@@ -62,7 +62,6 @@ pub fn build_env(plan: &BuildPlan, prefix: &Path) -> HashMap<String, String> {
 
     env.insert("MAKEFLAGS".into(), format!("-j{}", num_cpus()));
 
-    #[cfg(target_os = "macos")]
     if !env.contains_key("MACOSX_DEPLOYMENT_TARGET") {
         let target = std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| {
             zb_core::macos_major_version()
@@ -103,7 +102,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "macos")]
     fn build_env_includes_macosx_deployment_target() {
         let plan = test_plan();
         let env = build_env(&plan, &PathBuf::from("/opt/zerobrew/prefix"));
