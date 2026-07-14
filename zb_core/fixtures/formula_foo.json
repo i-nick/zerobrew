@@ -7,6 +7,10 @@
   "bottle": {
     "stable": {
       "files": {
+        "arm64_golden_gate": {
+          "url": "https://example.com/foo-1.2.3.arm64_golden_gate.bottle.tar.gz",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
         "arm64_sonoma": {
           "url": "https://example.com/foo-1.2.3.arm64_sonoma.bottle.tar.gz",
           "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

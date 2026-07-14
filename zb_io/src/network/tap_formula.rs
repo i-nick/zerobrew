@@ -721,7 +721,7 @@ class Terraform < Formula
   bottle do
     root_url "https://ghcr.io/v2/hashicorp/tap"
     rebuild 2
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sha256 cellar: :any_skip_relocation, arm64_golden_gate: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     sha256 cellar: :any_skip_relocation, x86_64_linux: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   end
 end
@@ -740,7 +740,13 @@ end
         assert_eq!(formula.bottle.stable.rebuild, 2);
         assert_eq!(formula.dependencies, vec!["openssl@3".to_string()]);
         assert_eq!(formula.build_dependencies, vec!["go".to_string()]);
-        assert!(formula.bottle.stable.files.contains_key("arm64_sonoma"));
+        assert!(
+            formula
+                .bottle
+                .stable
+                .files
+                .contains_key("arm64_golden_gate")
+        );
         assert!(formula.bottle.stable.files.contains_key("x86_64_linux"));
     }
 
@@ -749,7 +755,7 @@ end
         let source = r#"
 class Terraform < Formula
   bottle do
-    sha256 arm64_sonoma: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sha256 arm64_golden_gate: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   end
 end
 "#;
@@ -761,7 +767,7 @@ end
         };
 
         let formula = parse_tap_formula_ruby(&spec, source).unwrap();
-        let url = &formula.bottle.stable.files["arm64_sonoma"].url;
+        let url = &formula.bottle.stable.files["arm64_golden_gate"].url;
         assert_eq!(
             url,
             "https://ghcr.io/v2/hashicorp/tap/terraform/blobs/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -827,7 +833,7 @@ class Terraform < Formula
       sha256 x86_64_linux: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     end
     on_macos do
-      sha256 arm64_sonoma: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      sha256 arm64_golden_gate: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     end
   end
 end
@@ -841,7 +847,13 @@ end
         let formula = parse_tap_formula_ruby(&spec, source).unwrap();
 
         assert!(formula.bottle.stable.files.contains_key("x86_64_linux"));
-        assert!(formula.bottle.stable.files.contains_key("arm64_sonoma"));
+        assert!(
+            formula
+                .bottle
+                .stable
+                .files
+                .contains_key("arm64_golden_gate")
+        );
     }
 
     #[test]

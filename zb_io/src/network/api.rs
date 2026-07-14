@@ -1204,7 +1204,7 @@ class Terraform < Formula
   depends_on "go"
   bottle do
     root_url "https://ghcr.io/v2/hashicorp/tap"
-    sha256 arm64_sonoma: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sha256 arm64_golden_gate: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   end
 end
 "#;
@@ -1223,7 +1223,13 @@ end
         assert_eq!(formula.name, "terraform");
         assert_eq!(formula.versions.stable, "1.10.0");
         assert!(formula.dependencies.contains(&"go".to_string()));
-        assert!(formula.bottle.stable.files.contains_key("arm64_sonoma"));
+        assert!(
+            formula
+                .bottle
+                .stable
+                .files
+                .contains_key("arm64_golden_gate")
+        );
         let expected_path = format!(
             "{}{}/hashicorp/homebrew-tap/main/Formula/terraform.rb",
             RubySourceLocator::TAP_URL_PREFIX,
@@ -1283,7 +1289,7 @@ class Terraform < Formula
   version "1.10.0"
   bottle do
     root_url "https://ghcr.io/v2/hashicorp/tap"
-    sha256 arm64_sonoma: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sha256 arm64_golden_gate: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   end
 end
 "#;
@@ -1317,7 +1323,7 @@ class Terraform < Formula
   version "1.10.0"
   bottle do
     root_url "https://ghcr.io/v2/hashicorp/tap"
-    sha256 arm64_sonoma: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sha256 arm64_golden_gate: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   end
 end
 "#;
@@ -1345,7 +1351,7 @@ class Terraform < Formula
   version "1.10.0"
   bottle do
     root_url "https://ghcr.io/v2/hashicorp/tap"
-    sha256 arm64_sonoma: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sha256 arm64_golden_gate: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   end
 end
 "#;
@@ -1375,7 +1381,7 @@ class Terraform < Formula
   version "1.10.0"
   bottle do
     root_url "https://ghcr.io/v2/hashicorp/tap"
-    sha256 arm64_sonoma: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sha256 arm64_golden_gate: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   end
 end
 "#;
@@ -1405,7 +1411,7 @@ class Terraform < Formula
   version "1.10.0"
   bottle do
     root_url "https://ghcr.io/v2/hashicorp/tap"
-    sha256 arm64_sonoma: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sha256 arm64_golden_gate: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   end
 end
 "#;

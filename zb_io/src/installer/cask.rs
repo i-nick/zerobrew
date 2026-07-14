@@ -433,6 +433,7 @@ mod tests {
             }
         });
 
+        assert!(select_platform_variation_for_key(&cask, "arm64_golden_gate").is_none());
         assert!(select_platform_variation_for_key(&cask, "arm64_tahoe").is_none());
         let selected = select_platform_variation_for_key(&cask, "arm64_big_sur").unwrap();
         assert_eq!(

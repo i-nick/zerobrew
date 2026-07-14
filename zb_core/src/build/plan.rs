@@ -82,7 +82,7 @@ mod tests {
     fn test_formula(name: &str, source_url: &str, build_deps: &[&str]) -> Formula {
         let mut files = BTreeMap::new();
         files.insert(
-            "arm64_sonoma".to_string(),
+            "arm64_golden_gate".to_string(),
             BottleFile {
                 url: format!("https://example.com/{name}.tar.gz"),
                 sha256: "deadbeef".repeat(8),

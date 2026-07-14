@@ -11,7 +11,13 @@ pub struct SelectedBottle {
 /// Big Sur (11) was the first Apple Silicon release, so this list covers
 /// every arm64 bottle tag Homebrew has ever published.
 const MACOS_CODENAMES_NEWEST_FIRST: &[&str] = &[
-    "golden_gate", "tahoe", "sequoia", "sonoma", "ventura", "monterey", "big_sur",
+    "golden_gate",
+    "tahoe",
+    "sequoia",
+    "sonoma",
+    "ventura",
+    "monterey",
+    "big_sur",
 ];
 
 pub fn macos_major_version() -> Option<u32> {
@@ -148,6 +154,14 @@ mod tests {
             selected.sha256,
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         );
+
+        let selected = select_bottle_with_version(&formula, Some(27)).unwrap();
+
+        assert_eq!(selected.tag, "arm64_golden_gate");
+        assert_eq!(
+            selected.url,
+            "https://example.com/foo-1.2.3.arm64_golden_gate.bottle.tar.gz"
+        );
     }
 
     #[test]
@@ -261,7 +275,9 @@ mod tests {
         let codenames = compatible_codenames(Some(26));
         assert_eq!(
             codenames,
-            vec!["tahoe", "sequoia", "sonoma", "ventura", "monterey", "big_sur"]
+            vec![
+                "tahoe", "sequoia", "sonoma", "ventura", "monterey", "big_sur"
+            ]
         );
     }
 

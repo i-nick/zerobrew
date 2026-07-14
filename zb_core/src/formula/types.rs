@@ -251,7 +251,7 @@ mod tests {
             "dependencies": [],
             "keg_only": true,
             "bottle": { "stable": { "files": {
-                "arm64_sonoma": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
+                "arm64_golden_gate": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
             }}}
         }"#;
         let formula: Formula = serde_json::from_str(json).unwrap();
@@ -267,7 +267,7 @@ mod tests {
             "dependencies": [],
             "keg_only": "it conflicts with PostgreSQL",
             "bottle": { "stable": { "files": {
-                "arm64_sonoma": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
+                "arm64_golden_gate": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
             }}}
         }"#;
         let formula: Formula = serde_json::from_str(json).unwrap();
@@ -284,7 +284,7 @@ mod tests {
             "versions": { "stable": "15.8" },
             "dependencies": [],
             "bottle": { "stable": { "files": {
-                "arm64_sonoma": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
+                "arm64_golden_gate": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
             }}}
         }"#;
         let formula: Formula = serde_json::from_str(json).unwrap();
@@ -301,7 +301,7 @@ mod tests {
             "keg_only": true,
             "keg_only_reason": { "reason": ":provided_by_macos", "explanation": "" },
             "bottle": { "stable": { "files": {
-                "arm64_sonoma": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
+                "arm64_golden_gate": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
             }}}
         }"#;
         let formula: Formula = serde_json::from_str(json).unwrap();
@@ -338,7 +338,7 @@ mod tests {
             "keg_only": true,
             "keg_only_reason": { "reason": ":provided_by_macos", "explanation": "" },
             "bottle": { "stable": { "files": {
-                "arm64_sonoma": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
+                "arm64_golden_gate": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
             }}}
         }"#;
         let formula: Formula = serde_json::from_str(json).unwrap();
@@ -354,7 +354,7 @@ mod tests {
             "keg_only": true,
             "keg_only_reason": { "reason": ":versioned_formula", "explanation": "" },
             "bottle": { "stable": { "files": {
-                "arm64_sonoma": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
+                "arm64_golden_gate": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
             }}}
         }"#;
         let formula: Formula = serde_json::from_str(json).unwrap();
@@ -369,7 +369,7 @@ mod tests {
             "dependencies": [],
             "keg_only": true,
             "bottle": { "stable": { "files": {
-                "arm64_sonoma": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
+                "arm64_golden_gate": { "url": "https://x.com/a.tar.gz", "sha256": "aa" }
             }}}
         }"#;
         let formula: Formula = serde_json::from_str(json).unwrap();

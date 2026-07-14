@@ -508,6 +508,9 @@ mod test_support {
         fs::read(dmg_path).unwrap()
     }
 
+    /// Deliberately an old tag: mock formulas go through the real
+    /// `select_bottle`, so this must be compatible with any host macOS >= 14
+    /// (newer tags like arm64_golden_gate would fail selection on older hosts).
     pub fn get_test_bottle_tag() -> &'static str {
         "arm64_sonoma"
     }
