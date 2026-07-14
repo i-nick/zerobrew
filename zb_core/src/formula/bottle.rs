@@ -11,7 +11,7 @@ pub struct SelectedBottle {
 /// Big Sur (11) was the first Apple Silicon release, so this list covers
 /// every arm64 bottle tag Homebrew has ever published.
 const MACOS_CODENAMES_NEWEST_FIRST: &[&str] = &[
-    "tahoe", "sequoia", "sonoma", "ventura", "monterey", "big_sur",
+    "golden_gate", "tahoe", "sequoia", "sonoma", "ventura", "monterey", "big_sur",
 ];
 
 pub fn macos_major_version() -> Option<u32> {
@@ -30,7 +30,8 @@ fn codename_for_major(major: u32) -> Option<&'static str> {
     match major {
         // Future macOS releases run bottles for every older release; treat
         // them as the newest codename we know about.
-        26.. => Some("tahoe"),
+        27.. => Some("golden_gate"),
+        26 => Some("tahoe"),
         15 => Some("sequoia"),
         14 => Some("sonoma"),
         13 => Some("ventura"),
@@ -256,8 +257,17 @@ mod tests {
     }
 
     #[test]
-    fn compatible_codenames_on_tahoe_includes_all() {
+    fn compatible_codenames_on_tahoe_excludes_golden_gate() {
         let codenames = compatible_codenames(Some(26));
+        assert_eq!(
+            codenames,
+            vec!["tahoe", "sequoia", "sonoma", "ventura", "monterey", "big_sur"]
+        );
+    }
+
+    #[test]
+    fn compatible_codenames_on_golden_gate_includes_all() {
+        let codenames = compatible_codenames(Some(27));
         assert_eq!(codenames, MACOS_CODENAMES_NEWEST_FIRST);
     }
 
@@ -313,5 +323,41 @@ mod tests {
 
         let selected = select_bottle_with_version(&formula, Some(26)).unwrap();
         assert_eq!(selected.tag, "arm64_tahoe");
+    }
+
+    #[test]
+    fn tahoe_user_skips_golden_gate_bottle() {
+        let mut files = BTreeMap::new();
+        files.insert(
+            "arm64_golden_gate".to_string(),
+            bottle_file("https://example.com/golden_gate.tar.gz", &"aaaa".repeat(16)),
+        );
+        files.insert(
+            "arm64_tahoe".to_string(),
+            bottle_file("https://example.com/tahoe.tar.gz", &"bbbb".repeat(16)),
+        );
+
+        let formula = formula_with_files("libpq", files);
+
+        let selected = select_bottle_with_version(&formula, Some(26)).unwrap();
+        assert_eq!(selected.tag, "arm64_tahoe");
+    }
+
+    #[test]
+    fn golden_gate_user_picks_golden_gate_bottle() {
+        let mut files = BTreeMap::new();
+        files.insert(
+            "arm64_golden_gate".to_string(),
+            bottle_file("https://example.com/golden_gate.tar.gz", &"aaaa".repeat(16)),
+        );
+        files.insert(
+            "arm64_tahoe".to_string(),
+            bottle_file("https://example.com/tahoe.tar.gz", &"bbbb".repeat(16)),
+        );
+
+        let formula = formula_with_files("libpq", files);
+
+        let selected = select_bottle_with_version(&formula, Some(27)).unwrap();
+        assert_eq!(selected.tag, "arm64_golden_gate");
     }
 }

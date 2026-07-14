@@ -137,6 +137,32 @@ fn test_ffmpeg_formula() {
 
 #[test]
 #[ignore = "integration test"]
+fn test_future_macos_falls_back_to_older_bottle() {
+    // macOS 27+ maps to "golden_gate", a codename Homebrew publishes no
+    // bottles for yet, so installs must fall back to the newest older tag
+    // (tahoe, sequoia, …) rather than fail.
+    let sw_vers = Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .expect("failed to run sw_vers");
+    let major: u32 = String::from_utf8_lossy(&sw_vers.stdout)
+        .trim()
+        .split('.')
+        .next()
+        .and_then(|s| s.parse().ok())
+        .expect("failed to parse macOS version");
+    if major < 27 {
+        eprintln!("skipping: host macOS {major} has bottles for its own codename");
+        return;
+    }
+
+    let t = TestEnv::new();
+    assert_success(&t.zb(&["install", "xz"]), "zb install xz on macOS 27+");
+    assert_success(&t.run_binary("xz", &["--version"]), "xz --version");
+}
+
+#[test]
+#[ignore = "integration test"]
 fn test_curl_keg_only() {
     let t = TestEnv::new();
 

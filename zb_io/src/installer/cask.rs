@@ -147,7 +147,8 @@ fn current_macos_major_version() -> Option<u32> {
 
 fn arm64_macos_variation_key_for_major(major: u32) -> Option<&'static str> {
     match major {
-        26.. => Some("arm64_tahoe"),
+        27.. => Some("arm64_golden_gate"),
+        26 => Some("arm64_tahoe"),
         15 => Some("arm64_sequoia"),
         14 => Some("arm64_sonoma"),
         13 => Some("arm64_ventura"),
@@ -473,9 +474,16 @@ mod tests {
     }
 
     #[test]
-    fn arm64_variation_key_uses_tahoe_for_newer_macos_versions() {
-        assert_eq!(arm64_macos_variation_key_for_major(27), Some("arm64_tahoe"));
-        assert_eq!(arm64_macos_variation_key_for_major(30), Some("arm64_tahoe"));
+    fn arm64_variation_key_uses_golden_gate_for_newer_macos_versions() {
+        assert_eq!(arm64_macos_variation_key_for_major(26), Some("arm64_tahoe"));
+        assert_eq!(
+            arm64_macos_variation_key_for_major(27),
+            Some("arm64_golden_gate")
+        );
+        assert_eq!(
+            arm64_macos_variation_key_for_major(30),
+            Some("arm64_golden_gate")
+        );
     }
 
     #[test]
