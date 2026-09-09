@@ -60,6 +60,8 @@ trap cleanup EXIT
 
 ZEROBREW_REPO="https://github.com/i-nick/zerobrew.git"
 ZEROBREW_BIN="$HOME/.local/bin"
+ZSHRC_BLOCK_START="# >>> zerobrew installer >>>"
+ZSHRC_BLOCK_END="# <<< zerobrew installer <<<"
 
 # zerobrew only supports macOS on Apple Silicon.
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -187,6 +189,54 @@ install_bin() {
     done
 }
 
+# Ensure $HOME/.local/bin is on PATH for future zsh sessions.
+#
+# `zb init` also adds this directory to PATH, but it writes to .zshenv when
+# that file exists, so .zshrc can be left without the entry. This adds a
+# self-contained, idempotent block to .zshrc as well. The guard means PATH
+# never gains a duplicate entry when both blocks run.
+add_local_bin_to_zshrc() {
+    local no_modify="$1"
+
+    if [[ "$no_modify" == "true" ]]; then
+        return 0
+    fi
+
+    # Only touch .zshrc for zsh users; other shells are handled by `zb init`.
+    if [[ "${SHELL:-}" != *zsh* ]]; then
+        return 0
+    fi
+
+    local zshrc="${ZDOTDIR:-$HOME}/.zshrc"
+
+    if [[ -f "$zshrc" ]] && grep -qF "$ZSHRC_BLOCK_START" "$zshrc"; then
+        completed "PATH entry for ${ORANGE}~/.local/bin${NC} already present in $zshrc"
+        return 0
+    fi
+
+    local block
+    block=$(
+        printf '\n%s\n' "$ZSHRC_BLOCK_START"
+        printf 'case ":${PATH}:" in\n'
+        printf '    *:"$HOME/.local/bin":*) ;;\n'
+        printf '    *) export PATH="$HOME/.local/bin:$PATH" ;;\n'
+        printf 'esac\n'
+        printf '%s' "$ZSHRC_BLOCK_END"
+    )
+
+    # Write with a single simple command: bash only reports a failed
+    # redirection through `!` reliably for simple commands, not for groups.
+    # stderr is redirected first so bash's own "Permission denied" is
+    # suppressed in favour of the warning below.
+    if ! printf '%s\n' "$block" 2>/dev/null >> "$zshrc"; then
+        warn "Could not write to $zshrc. Add this line to it manually:"
+        warn '  export PATH="$HOME/.local/bin:$PATH"'
+        return 0
+    fi
+
+    completed "Added ${ORANGE}~/.local/bin${NC} to PATH in $zshrc"
+}
+
 zb_init() {
     local zb_path="$1"
     local no_modify="$2"
@@ -213,6 +263,7 @@ finalize_installation() {
     fi
 
     zb_init "$ZEROBREW_BIN/zb" "$no_modify"
+    add_local_bin_to_zshrc "$no_modify"
 
     print_logo
     completed "Installation complete"
