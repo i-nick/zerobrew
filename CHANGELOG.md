@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Chinese translation of the README ([#315](https://github.com/i-nick/zerobrew/pull/316))
 - Regex matches on `/Cellar/<pkg>/)([^/]+)(/)`, so it only matches version segments within Cellar-style paths ([#317](https://github.com/i-nick/zerobrew/pull/317))
+- `install.sh` now adds `~/.local/bin` to `~/.zshrc` for zsh users, so the PATH entry lands there even when `zb init` writes to `.zshenv`
 
 ### Added
 - `zb doctor` command with `--repair` flag for state diagnosis and recovery ([#314](https://github.com/i-nick/zerobrew/pull/314))
