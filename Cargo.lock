@@ -149,6 +149,70 @@ dependencies = [
 ]
 
 [[package]]
+name = "brew_cli"
+version = "0.2.1"
+dependencies = [
+ "brew_core",
+ "brew_io",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "console",
+ "flate2",
+ "hex",
+ "indicatif",
+ "libc",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "walkdir",
+ "wiremock",
+]
+
+[[package]]
+name = "brew_core"
+version = "0.2.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "brew_io"
+version = "0.2.1"
+dependencies = [
+ "brew_core",
+ "flate2",
+ "futures",
+ "futures-util",
+ "hex",
+ "libc",
+ "rayon",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "sha2",
+ "strsim",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "walkdir",
+ "wiremock",
+ "xz2",
+ "zip",
+ "zstd",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2514,70 +2578,6 @@ dependencies = [
  "quote",
  "syn 3.0.6",
  "synstructure",
-]
-
-[[package]]
-name = "zb_cli"
-version = "0.2.1"
-dependencies = [
- "chrono",
- "clap",
- "clap_complete",
- "console",
- "flate2",
- "hex",
- "indicatif",
- "libc",
- "serde_json",
- "sha2",
- "tar",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "walkdir",
- "wiremock",
- "zb_core",
- "zb_io",
-]
-
-[[package]]
-name = "zb_core"
-version = "0.2.1"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "zb_io"
-version = "0.2.1"
-dependencies = [
- "flate2",
- "futures",
- "futures-util",
- "hex",
- "libc",
- "rayon",
- "regex",
- "reqwest",
- "rusqlite",
- "rustls",
- "rustls-native-certs",
- "serde",
- "serde_json",
- "sha2",
- "strsim",
- "tar",
- "tempfile",
- "tokio",
- "tracing",
- "walkdir",
- "wiremock",
- "xz2",
- "zb_core",
- "zip",
- "zstd",
 ]
 
 [[package]]

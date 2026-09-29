@@ -1,17 +1,16 @@
 <div align="center">
 
-<h2>zerobrew</h2>
+<h2>brew</h2>
 
-[![Lint](https://github.com/i-nick/zerobrew/actions/workflows/ci.yml/badge.svg)](https://github.com/i-nick/zerobrew/actions/workflows/ci.yml)
-[![Test](https://github.com/i-nick/zerobrew/actions/workflows/test.yml/badge.svg)](https://github.com/i-nick/zerobrew/actions/workflows/test.yml)
+[![CI](https://github.com/i-nick/zerobrew/actions/workflows/ci.yml/badge.svg)](https://github.com/i-nick/zerobrew/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/i-nick/zerobrew?display_name=tag)](https://github.com/i-nick/zerobrew/releases)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/ZaPYwm9zaw)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE-MIT.md)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE-APACHE.md)
 
-<img alt="zerobrew demo" src="./assets/zb-demo.gif" />
+<img alt="brew demo" src="./assets/b-demo.gif" />
 
-<p><strong>zerobrew brings uv-style architecture to Homebrew packages on Apple Silicon Macs.</strong></p>
+<p><strong>brew brings uv-style architecture to package management on Apple Silicon Macs.</strong></p>
 
 </div>
 
@@ -21,63 +20,36 @@
 curl -fsSL https://raw.githubusercontent.com/i-nick/zerobrew/refs/heads/main/install.sh | bash
 ```
 
-Or via Homebrew:
-
-```bash
-brew tap i-nick/zerobrew && brew install zerobrew
-```
-
 After install, run the `export` command it prints (or restart your terminal).
+
+The CLI is `b`; `brew` is installed as an alias, so `brew install jq` works too.
 
 ## Quick start
 
 ```bash
-zb install jq                   # install one package
-zb install wget git             # install multiple
-zb install hashicorp/tap/terraform  # install a third-party formula by explicit ref
-zb bundle                       # install from Brewfile
-zb bundle install -f myfile     # install from custom file
-zb bundle dump                  # export installed packages to Brewfile
-zb bundle dump -f out --force   # dump to custom file (overwrite)
-zb uninstall jq                 # uninstall one package
-zb reset                        # uninstall everything
-zb gc                           # garbage collect unused store entries
-zbx jq --version                # run without linking
+b install jq                   # install one package
+b install wget git             # install multiple
+b install hashicorp/tap/terraform  # install a third-party formula by explicit ref
+b bundle                       # install from Brewfile
+b bundle install -f myfile     # install from custom file
+b bundle dump                  # export installed packages to Brewfile
+b bundle dump -f out --force   # dump to custom file (overwrite)
+b uninstall jq                 # uninstall one package
+b reset                        # uninstall everything
+b gc                           # garbage collect unused store entries
+bx jq --version                # run without linking
 ```
 
-## Performance snapshot
+## How it works
 
-<div align="center">
-
-| Package | Homebrew | ZB (cold) | ZB (warm) | Cold Speedup | Warm Speedup |
-|---------|----------|-----------|-----------|--------------|--------------|
-| **Overall (top 100)** | 452s | 226s | 59s | **2.0x** | **7.6x** |
-| ffmpeg | 3034ms | 3481ms | 688ms | 0.9x | 4.4x |
-| libsodium | 2353ms | 392ms | 130ms | 6.0x | 18.1x |
-| sqlite | 2876ms | 625ms | 159ms | 4.6x | 18.1x |
-| tesseract | 18950ms | 5536ms | 643ms | 3.4x | 29.5x |
-
-</div>
-
-## Relationship with Homebrew
-
-zerobrew is more of a performance-optimized client for the Homebrew ecosystem. We rely on:
-- Homebrew's formula definitions (homebrew-core)
-- Homebrew's pre-built bottles when available
-- Homebrew's package metadata and infrastructure
-
-Our innovations focus on:
 - Content-addressable storage for deduplication
 - APFS clonefiles for zero-overhead copying
-- Source build fallback using Homebrew's Ruby DSL
+- Source build fallback using a Ruby formula DSL shim
 
-For third-party Homebrew taps, zerobrew does not maintain a separate tap registry. Install those
-formulas with explicit references such as `owner/repo/formula`, and use the same explicit ref in
-your Brewfiles.
+brew does not maintain a separate tap registry. Install third-party formulas with explicit
+references such as `owner/repo/formula`, and use the same explicit ref in your Brewfiles.
 
-zerobrew is experimental. We recommend running it alongside Homebrew rather than as a replacement, and do _not_ 
-recommend purging homebrew and replacing it with zerobrew unless you are absolutely sure about the implications of 
-doing so. 
+Package metadata and bottles come from the Homebrew project; see [LICENSE-HOMEBREW](./LICENSE-HOMEBREW).
 
 ## Project status
 
@@ -90,6 +62,6 @@ doing so.
   </a>
 </div>
 
-- **Status:** Experimental, but already useful for many common Homebrew formulas.
+- **Status:** Experimental, but already useful for many common formulas.
 - **Feedback:** If you hit incompatibilities, please open an issue or PR.
 - **License:** Dual-licensed under [Apache 2.0](./LICENSE-APACHE.md) OR [MIT](./LICENSE-MIT.md), at your choice.

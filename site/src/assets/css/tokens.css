@@ -8,9 +8,9 @@
   --color-bg: hsl(50 48% 90%);           /* cream */
   --color-surface: hsl(40 73% 81%);      /* beige */
   --color-wave: hsl(40 88% 57%);         /* gold */
-  --color-warm: hsl(20 100% 47%);        /* orange (ZB warm) */
+  --color-warm: hsl(20 100% 47%);        /* orange (B warm) */
   --color-blue-light: hsl(220 85% 66%);  /* sky blue */
-  --color-cold: hsl(220 88% 57%);        /* cobalt blue (ZB cold) */
+  --color-cold: hsl(220 88% 57%);        /* cobalt blue (B cold) */
   --color-fg: hsl(0 0% 10%);             /* charcoal */
   --color-fg-soft: hsl(0 0% 10% / 0.75);
 

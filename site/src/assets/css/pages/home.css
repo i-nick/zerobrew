@@ -24,8 +24,7 @@
   box-shadow: var(--shadow-2);
 }
 
-#install,
-#benchmarks {
+#install {
   scroll-margin-top: 7.5rem;
 }
 
@@ -47,16 +46,10 @@
 
 .info-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-6);
   align-items: stretch;
   margin-bottom: var(--space-7);
-}
-
-@media (max-width: 820px) {
-  .info-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 600px) {

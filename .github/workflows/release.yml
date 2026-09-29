@@ -1,23 +1,19 @@
 name: release
 
+# Every merge to main (a push to main) publishes a new release.
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [ main ]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to release (must be an existing tag, e.g. v1.0.0)'
-        required: true
-        type: string
 
 permissions:
   contents: write
   attestations: write
   id-token: write
 
+# Releases run one at a time so each computes its version after the last tag exists.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 env:
@@ -25,105 +21,75 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  lint:
-    name: Lint
-    if: github.repository == 'i-nick/zerobrew' && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v')))
+  ci:
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
-    with:
-      ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
 
-  build:
-    name: Build ${{ matrix.artifact_name }}
-    needs: lint
-    runs-on: ${{ matrix.os }}
-    if: github.repository == 'i-nick/zerobrew' && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v')))
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            artifact_name: zb-darwin-arm64
-            zbx_artifact_name: zbx-darwin-arm64
-
+  release:
+    needs: ci
+    runs-on: macos-latest
+    if: github.repository == 'i-nick/zerobrew'
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          fetch-depth: 0
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Compute version
+        id: version
+        run: |
+          set -euo pipefail
+          base=$(sed -n 's/^version = "\(.*\)"/\1/p' brew_cli/Cargo.toml | head -1)
+          if ! git rev-parse -q --verify "refs/tags/v$base" >/dev/null; then
+            version="$base"
+          else
+            latest=$(git tag -l 'v*' --sort=-v:refname | head -1)
+            IFS=. read -r major minor patch <<< "${latest#v}"
+            version="$major.$minor.$((patch + 1))"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$version"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          targets: ${{ matrix.target }}
+          shared-key: release
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: release-${{ matrix.target }}
+      - name: Set crate versions
+        run: |
+          sed -i '' 's/^version = ".*"/version = "${{ steps.version.outputs.version }}"/' brew_*/Cargo.toml
+          cargo update --workspace
 
-      - name: Build release binary
+      - name: Build
         env:
           LZMA_API_STATIC: "1"
-        run: cargo build --release --locked --target ${{ matrix.target }} --package zb_cli
+        run: cargo build --release --package brew_cli
 
-      - name: Verify no dynamic liblzma dependency (macOS)
-        if: contains(matrix.target, 'apple-darwin')
+      - name: Verify no dynamic liblzma dependency
         run: |
-          otool -L target/${{ matrix.target }}/release/zb
-          if otool -L target/${{ matrix.target }}/release/zb | grep -Eq '/opt/homebrew|/usr/local/opt|liblzma'; then
+          otool -L target/release/b
+          if otool -L target/release/b | grep -Eq '/opt/homebrew|/usr/local/opt|liblzma'; then
             echo "error: unexpected dynamic dependency detected in release binary"
             exit 1
           fi
 
-      - name: Prepare binaries
-        run: |
-          cp target/${{ matrix.target }}/release/zb ${{ matrix.artifact_name }}
-          cp target/${{ matrix.target }}/release/zbx ${{ matrix.zbx_artifact_name }}
-
-      - name: Upload zb binary as artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}
-          retention-days: 7
-
-      - name: Upload zbx binary as artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.zbx_artifact_name }}
-          path: ${{ matrix.zbx_artifact_name }}
-          retention-days: 7
-
-  release:
-    name: Create GitHub Release
-    needs: build
-    runs-on: macos-latest
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v'))
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: assets
-          pattern: "zb*-*"
-          merge-multiple: true
-
-      - name: Generate checksums
+      - name: Package
         run: |
           set -euo pipefail
+          mkdir assets
+          cp target/release/b assets/b-darwin-arm64
+          cp target/release/bx assets/bx-darwin-arm64
           cd assets
           shasum -a 256 -- * > SHA256SUMS
 
-      - name: Attest release artifacts
-        uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-checksums: assets/SHA256SUMS
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          tag_name: v${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           files: assets/*
           generate_release_notes: true
-          draft: false

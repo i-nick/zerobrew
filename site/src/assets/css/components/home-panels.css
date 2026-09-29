@@ -1,5 +1,4 @@
-.install-panel,
-.bench-panel {
+.install-panel {
   min-width: 0;
   color: var(--color-fg);
   display: flex;
@@ -153,92 +152,6 @@
   white-space: nowrap;
 }
 
-.bench-card {
-  border: var(--border-strong);
-  background: var(--color-surface);
-  border-radius: var(--radius-3);
-  padding: var(--space-3) var(--space-4) var(--space-4);
-  flex: 1;
-}
-
-.bench-card .panel-eyebrow {
-  color: var(--color-warm);
-}
-
-.bench-header {
-  font-weight: 700;
-  margin: calc(var(--space-3) * -1) calc(var(--space-4) * -1) var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: var(--border-strong);
-  background: var(--color-surface);
-  border-top-left-radius: var(--radius-3);
-  border-top-right-radius: var(--radius-3);
-}
-
-.bench-title {
-  margin: 0;
-  font: inherit;
-  line-height: 1.2;
-}
-
-.bench-list {
-  display: grid;
-  gap: var(--space-3);
-}
-
-.bench-row {
-  display: grid;
-  grid-template-columns: var(--space-8) 1fr var(--space-8);
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.bench-label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--bench-color, var(--color-fg));
-  text-align: center;
-  line-height: 1;
-}
-
-.bench-tag {
-  font-size: 0.7em;
-  font-weight: 600;
-  opacity: 0.8;
-}
-
-.bench-bar {
-  height: var(--space-7);
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.bench-fill {
-  display: block;
-  height: 100%;
-  border: var(--border-strong);
-  border-radius: var(--radius-2);
-  box-shadow: var(--shadow-1);
-  background: var(--bench-color, var(--color-warm));
-}
-
-.bench-speedup-text {
-  font-size: 0.75em;
-  font-weight: 600;
-  opacity: 0.6;
-  white-space: nowrap;
-}
-
-.bench-time {
-  text-align: right;
-  font-weight: 700;
-}
-
 @media (max-width: 720px) {
   .install-tab-group {
     width: 100%;
@@ -283,22 +196,4 @@
     overflow-wrap: anywhere;
   }
 
-  .bench-row {
-    grid-template-columns: 1fr;
-    gap: var(--space-2);
-  }
-
-  .bench-label {
-    flex-direction: row;
-    align-items: baseline;
-    justify-content: space-between;
-  }
-
-  .bench-bar {
-    height: var(--space-6);
-  }
-
-  .bench-time {
-    text-align: left;
-  }
 }

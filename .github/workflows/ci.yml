@@ -1,87 +1,46 @@
-name: lint
+name: ci
 
+# Pull requests run this directly; release.yml calls it before every release.
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/ci.yml'
   pull_request:
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/ci.yml'
-  # Called by release.yml so a release cannot ship code that fails lint.
   workflow_call:
-    inputs:
-      ref:
-        description: 'Git ref to lint (defaults to the triggering ref)'
-        required: false
-        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  fmt:
-    name: fmt
+  check:
+    name: check
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          components: rustfmt, clippy
 
-      - name: install rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
 
-      - name: check formatting
-        run: cargo fmt --all -- --check
-
-  clippy:
-    name: clippy
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-
-      - name: install rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: cache rust dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: setup pkg-config path
-        run: |
-          if [ -d "/opt/zerobrew/lib/pkgconfig" ]; then
-            echo "PKG_CONFIG_PATH=/opt/zerobrew/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> $GITHUB_ENV
-          fi
-
-      - name: run clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-  audit:
-    name: audit
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-
-      - name: install cargo-audit
-        uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
 
-      - name: cargo audit
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: test
+        run: cargo test --workspace --locked
+
+      - name: audit
         run: cargo audit
