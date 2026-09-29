@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI actions updated to their latest Node 24 releases; `cargo audit` runs directly instead of via `rustsec/audit-check`
 - Release workflow now runs fmt, clippy (`-D warnings`) and `cargo audit` before building
 - Removed the weekly Homebrew compatibility workflow
+- Test workflow runs on stable Rust only (dropped the Rust 1.90 job)
 
 ### Security
 - Bump `h2` and `rustls` to fix RUSTSEC-2026-0258 and RUSTSEC-2026-0285
