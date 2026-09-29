@@ -371,7 +371,7 @@ pub(crate) async fn download_with_chunks(
         });
     }
 
-    let actual_hash = format!("{:x}", hasher.finalize());
+    let actual_hash = hex::encode(hasher.finalize());
 
     if actual_hash != ctx.expected_sha256 {
         return Err(Error::ChecksumMismatch {
@@ -441,7 +441,7 @@ mod tests {
         let actual_sha256 = {
             let mut hasher = Sha256::new();
             hasher.update(&large_content);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         };
 
         Mock::given(method("HEAD"))
@@ -521,7 +521,7 @@ mod tests {
         let actual_sha256 = {
             let mut hasher = Sha256::new();
             hasher.update(&large_content);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         };
 
         Mock::given(method("HEAD"))
@@ -562,7 +562,7 @@ mod tests {
         let actual_sha256 = {
             let mut hasher = Sha256::new();
             hasher.update(&small_content);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         };
 
         Mock::given(method("HEAD"))
@@ -619,7 +619,7 @@ mod tests {
         let actual_sha256 = {
             let mut hasher = Sha256::new();
             hasher.update(&large_content);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         };
 
         Mock::given(method("HEAD"))
@@ -706,7 +706,7 @@ mod tests {
         let actual_sha256 = {
             let mut hasher = Sha256::new();
             hasher.update(&large_content);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         };
 
         Mock::given(method("HEAD"))
@@ -789,7 +789,7 @@ mod tests {
         let actual_sha256 = {
             let mut hasher = Sha256::new();
             hasher.update(&large_content);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         };
 
         Mock::given(method("HEAD"))
@@ -887,7 +887,7 @@ mod tests {
         let actual_sha256 = {
             let mut hasher = Sha256::new();
             hasher.update(&large_content);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         };
 
         Mock::given(method("HEAD"))
@@ -955,7 +955,7 @@ mod tests {
         let actual_sha256 = {
             let mut hasher = Sha256::new();
             hasher.update(&large_content);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         };
 
         Mock::given(method("HEAD"))

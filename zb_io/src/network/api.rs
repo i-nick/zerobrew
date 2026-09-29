@@ -1540,7 +1540,7 @@ end
             .unwrap();
 
         let fresh_body = "class Foo < Formula\n  version \"1.0\"\nend\n";
-        let expected = format!("{:x}", Sha256::digest(fresh_body.as_bytes()));
+        let expected = hex::encode(Sha256::digest(fresh_body.as_bytes()));
         Mock::given(method("GET"))
             .and(path("/Formula/f/foo.rb"))
             .respond_with(ResponseTemplate::new(200).set_body_string(fresh_body))

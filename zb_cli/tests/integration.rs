@@ -137,10 +137,10 @@ fn test_ffmpeg_formula() {
 
 #[test]
 #[ignore = "integration test"]
-fn test_future_macos_falls_back_to_older_bottle() {
-    // macOS 27+ maps to "golden_gate", a codename Homebrew publishes no
-    // bottles for yet, so installs must fall back to the newest older tag
-    // (tahoe, sequoia, …) rather than fail.
+fn test_macos_27_installs_golden_gate_bottle() {
+    // macOS 27+ maps to "golden_gate". Installs must use those bottles when
+    // published and fall back to the newest older tag (tahoe, sequoia, …)
+    // for formulas that have not been rebuilt yet.
     let sw_vers = Command::new("sw_vers")
         .arg("-productVersion")
         .output()
