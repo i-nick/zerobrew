@@ -15,7 +15,7 @@ pub fn verify_sha256_bytes(bytes: &[u8], expected_sha256: Option<&str>) -> Resul
 
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    let actual = format!("{:x}", hasher.finalize());
+    let actual = hex::encode(hasher.finalize());
 
     if actual != expected {
         return Err(Error::ChecksumMismatch { expected, actual });

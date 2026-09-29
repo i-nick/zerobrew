@@ -378,6 +378,7 @@ impl Installer {
             install_cask_from_root(
                 mounted.path(),
                 &keg_path,
+                &self.appdir,
                 &cask,
                 &previous_external_paths,
                 &mut cleanup,
@@ -387,6 +388,7 @@ impl Installer {
             install_cask_from_root(
                 &extracted,
                 &keg_path,
+                &self.appdir,
                 &cask,
                 &previous_external_paths,
                 &mut cleanup,
@@ -396,6 +398,7 @@ impl Installer {
             install_cask_from_root(
                 mounted.path(),
                 &keg_path,
+                &self.appdir,
                 &cask,
                 &previous_external_paths,
                 &mut cleanup,
@@ -626,12 +629,13 @@ fn external_artifact_paths(records: &[KegFileRecord], prefix: &Path) -> HashSet<
 fn install_cask_from_root(
     source_root: &Path,
     keg_path: &Path,
+    app_dir: &Path,
     cask: &crate::installer::cask::ResolvedCask,
     previous_external_paths: &HashSet<PathBuf>,
     cleanup: &mut FailedInstallGuard<'_>,
 ) -> Result<(), Error> {
     let installed_apps = if has_app_backed_payload(cask) {
-        install_cask_apps(source_root, cask, previous_external_paths, cleanup)?
+        install_cask_apps(source_root, app_dir, cask, previous_external_paths, cleanup)?
     } else {
         HashMap::new()
     };
@@ -641,12 +645,12 @@ fn install_cask_from_root(
 
 fn install_cask_apps(
     source_root: &Path,
+    app_dir: &Path,
     cask: &crate::installer::cask::ResolvedCask,
     previous_external_paths: &HashSet<PathBuf>,
     cleanup: &mut FailedInstallGuard<'_>,
 ) -> Result<HashMap<String, PathBuf>, Error> {
-    let app_dir = user_applications_dir()?;
-    fs::create_dir_all(&app_dir).map_err(Error::store("failed to create user Applications dir"))?;
+    fs::create_dir_all(app_dir).map_err(Error::store("failed to create Applications dir"))?;
 
     let mut installed_apps = HashMap::new();
     let desired_destinations: HashSet<PathBuf> = cask
@@ -960,13 +964,6 @@ fn remove_path(path: &Path) -> Result<(), Error> {
     }
 
     Ok(())
-}
-
-fn user_applications_dir() -> Result<PathBuf, Error> {
-    let home = std::env::var_os("HOME").ok_or_else(|| Error::InvalidArgument {
-        message: "HOME must be set to install app-backed casks".to_string(),
-    })?;
-    Ok(PathBuf::from(home).join("Applications"))
 }
 
 struct MountedDmg {
@@ -1422,7 +1419,7 @@ mod tests {
         let linker = Linker::new(prefix).unwrap();
         let db = Database::open(&root.join("db/zb.sqlite3")).unwrap();
 
-        Installer::new(
+        let mut installer = Installer::new(
             api_client,
             blob_cache,
             store,
@@ -1431,7 +1428,10 @@ mod tests {
             db,
             prefix.to_path_buf(),
             root.join("locks"),
-        )
+        );
+        // Keep app bundles out of the real /Applications.
+        installer.appdir = root.parent().unwrap().join("Applications");
+        installer
     }
 
     #[tokio::test]
@@ -1486,12 +1486,9 @@ end
 
     #[tokio::test]
     async fn install_cask_dmg_places_app_and_uninstalls_cleanly() {
-        let _home_lock = HOME_ENV_LOCK.lock().await;
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
-        let home = tmp.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let _home_override = HomeOverride::set(&home);
+        let appdir = tmp.path().join("Applications");
 
         let dmg = create_cask_dmg("Zed.app", "Contents/MacOS/cli", "#!/bin/sh\necho zed");
         let dmg_sha = sha256_hex(&dmg);
@@ -1521,7 +1518,7 @@ end
             .await
             .unwrap();
 
-        let app_binary = home.join("Applications/Zed.app/Contents/MacOS/cli");
+        let app_binary = appdir.join("Zed.app/Contents/MacOS/cli");
         assert!(app_binary.exists());
         assert!(prefix.join("bin/zed").exists());
         assert_eq!(
@@ -1534,23 +1531,19 @@ end
                 .list_keg_files_for_name("cask:zed")
                 .unwrap()
                 .iter()
-                .any(|record| record.linked_path
-                    == home.join("Applications/Zed.app").display().to_string())
+                .any(|record| record.linked_path == appdir.join("Zed.app").display().to_string())
         );
 
         installer.uninstall("cask:zed", false).unwrap();
-        assert!(!home.join("Applications/Zed.app").exists());
+        assert!(!appdir.join("Zed.app").exists());
         assert!(!prefix.join("bin/zed").exists());
     }
 
     #[tokio::test]
     async fn install_app_only_cask_places_app_without_binary_links() {
-        let _home_lock = HOME_ENV_LOCK.lock().await;
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
-        let home = tmp.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let _home_override = HomeOverride::set(&home);
+        let appdir = tmp.path().join("Applications");
 
         let dmg = create_cask_dmg(
             "Brave Browser.app",
@@ -1588,11 +1581,11 @@ end
             .await
             .unwrap();
 
-        assert!(home.join("Applications/Brave Browser.app").exists());
+        assert!(appdir.join("Brave Browser.app").exists());
         assert!(!prefix.join("bin/brave-browser").exists());
 
         installer.uninstall("cask:brave-browser", false).unwrap();
-        assert!(!home.join("Applications/Brave Browser.app").exists());
+        assert!(!appdir.join("Brave Browser.app").exists());
     }
 
     #[tokio::test]
@@ -1600,6 +1593,7 @@ end
         let _home_lock = HOME_ENV_LOCK.lock().await;
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
+        let appdir = tmp.path().join("Applications");
         let home = tmp.path().join("home");
         fs::create_dir_all(&home).unwrap();
         let _home_override = HomeOverride::set(&home);
@@ -1646,19 +1640,16 @@ end
 
         installer.uninstall("cask:ghostty", false).unwrap();
 
-        assert!(!home.join("Applications/Ghostty.app").exists());
+        assert!(!appdir.join("Ghostty.app").exists());
         assert!(!zap_file.exists());
         assert!(!zap_dir.exists());
     }
 
     #[tokio::test]
     async fn install_cask_dmg_honors_no_link() {
-        let _home_lock = HOME_ENV_LOCK.lock().await;
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
-        let home = tmp.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let _home_override = HomeOverride::set(&home);
+        let appdir = tmp.path().join("Applications");
 
         let dmg = create_cask_dmg("Zed.app", "Contents/MacOS/cli", "#!/bin/sh\necho zed");
         let dmg_sha = sha256_hex(&dmg);
@@ -1688,23 +1679,17 @@ end
             .await
             .unwrap();
 
-        assert!(
-            home.join("Applications/Zed.app/Contents/MacOS/cli")
-                .exists()
-        );
+        assert!(appdir.join("Zed.app/Contents/MacOS/cli").exists());
         assert!(!prefix.join("bin/zed").exists());
         assert!(root.join("cellar/cask:zed/1.0.0/bin/zed").exists());
     }
 
     #[tokio::test]
     async fn reinstall_cask_replaces_owned_app_bundle() {
-        let _home_lock = HOME_ENV_LOCK.lock().await;
         let first_server = MockServer::start().await;
         let second_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
-        let home = tmp.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let _home_override = HomeOverride::set(&home);
+        let appdir = tmp.path().join("Applications");
 
         let first_dmg = create_cask_dmg("Zed.app", "Contents/MacOS/cli", "#!/bin/sh\necho first");
         let first_sha = sha256_hex(&first_dmg);
@@ -1754,24 +1739,21 @@ end
             .await
             .unwrap();
 
-        let contents =
-            fs::read_to_string(home.join("Applications/Zed.app/Contents/MacOS/cli")).unwrap();
+        let contents = fs::read_to_string(appdir.join("Zed.app/Contents/MacOS/cli")).unwrap();
         assert!(contents.contains("second"));
     }
 
     #[tokio::test]
     async fn install_cask_overwrites_existing_app_bundle() {
-        let _home_lock = HOME_ENV_LOCK.lock().await;
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();
-        let home = tmp.path().join("home");
-        fs::create_dir_all(home.join("Applications/Zed.app/Contents/MacOS")).unwrap();
+        let appdir = tmp.path().join("Applications");
+        fs::create_dir_all(appdir.join("Zed.app/Contents/MacOS")).unwrap();
         fs::write(
-            home.join("Applications/Zed.app/Contents/MacOS/cli"),
+            appdir.join("Zed.app/Contents/MacOS/cli"),
             "#!/bin/sh\necho old",
         )
         .unwrap();
-        let _home_override = HomeOverride::set(&home);
 
         let dmg = create_cask_dmg("Zed.app", "Contents/MacOS/cli", "#!/bin/sh\necho zed");
         let dmg_sha = sha256_hex(&dmg);
@@ -1801,8 +1783,7 @@ end
             .await
             .unwrap();
 
-        let contents =
-            fs::read_to_string(home.join("Applications/Zed.app/Contents/MacOS/cli")).unwrap();
+        let contents = fs::read_to_string(appdir.join("Zed.app/Contents/MacOS/cli")).unwrap();
         assert!(contents.contains("zed"));
         assert!(!contents.contains("old"));
     }

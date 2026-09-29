@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Split monolithic install module into focused submodules ([#312](https://github.com/i-nick/zerobrew/pull/312))
 - Split monolithic download module into focused submodules ([#313](https://github.com/i-nick/zerobrew/pull/313))
+- Cask app bundles are now installed to `/Applications` instead of `~/Applications`
+- Source builds now see the host macOS version (e.g. 27 / `:golden_gate`) instead of a hardcoded 15.0, and `MacOS.version` comparisons against codenames work
+- Updated all dependencies to their latest releases (including `zip` 8, `zstd` 0.14, `rusqlite` 0.40, `sha2` 0.11); replaced `fs4` with std file locking
+- CI actions updated to their latest Node 24 releases; `cargo audit` runs directly instead of via `rustsec/audit-check`
+- Release workflow now runs fmt, clippy (`-D warnings`) and `cargo audit` before building
+
+### Security
+- Bump `h2` and `rustls` to fix RUSTSEC-2026-0258 and RUSTSEC-2026-0285
 
 
 ## [0.2.1] - 2026-03-14

@@ -25,8 +25,18 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  lint:
+    name: Lint
+    if: github.repository == 'i-nick/zerobrew' && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v')))
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
   build:
     name: Build ${{ matrix.artifact_name }}
+    needs: lint
     runs-on: ${{ matrix.os }}
     if: github.repository == 'i-nick/zerobrew' && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v')))
     strategy:
@@ -39,7 +49,7 @@ jobs:
             zbx_artifact_name: zbx-darwin-arm64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
 
@@ -73,14 +83,14 @@ jobs:
           cp target/${{ matrix.target }}/release/zbx ${{ matrix.zbx_artifact_name }}
 
       - name: Upload zb binary as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}
           retention-days: 7
 
       - name: Upload zbx binary as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.zbx_artifact_name }}
           path: ${{ matrix.zbx_artifact_name }}
@@ -93,7 +103,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v'))
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: assets
           pattern: "zb*-*"
@@ -106,12 +116,12 @@ jobs:
           shasum -a 256 -- * > SHA256SUMS
 
       - name: Attest release artifacts
-        uses: actions/attest-build-provenance@v3.2.0
+        uses: actions/attest-build-provenance@v4
         with:
           subject-checksums: assets/SHA256SUMS
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           files: assets/*

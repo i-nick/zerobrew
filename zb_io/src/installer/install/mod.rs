@@ -10,7 +10,6 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use fs4::fs_std::FileExt;
 use tracing::warn;
 
 use crate::cellar::link::Linker;
@@ -29,6 +28,9 @@ use bottle::{LinkFormulaRequest, dependency_cellar_path};
 
 const MAX_CORRUPTION_RETRIES: usize = 3;
 
+/// Directory cask app bundles are installed into.
+const DEFAULT_APPDIR: &str = "/Applications";
+
 pub struct Installer {
     api_client: ApiClient,
     downloader: ParallelDownloader,
@@ -38,6 +40,7 @@ pub struct Installer {
     pub(crate) db: Database,
     prefix: PathBuf,
     locks_dir: PathBuf,
+    appdir: PathBuf,
 }
 
 #[derive(Debug)]
@@ -125,6 +128,7 @@ impl Installer {
             db,
             prefix,
             locks_dir,
+            appdir: PathBuf::from(DEFAULT_APPDIR),
         }
     }
 
@@ -146,7 +150,7 @@ impl Installer {
         let lock_file =
             File::create(&lock_path).map_err(Error::store("failed to create install lock"))?;
         lock_file
-            .lock_exclusive()
+            .lock()
             .map_err(Error::store("failed to acquire install lock"))?;
         let _lock = lock_file;
 
@@ -438,6 +442,7 @@ pub fn create_installer(
         db,
         prefix: prefix.to_path_buf(),
         locks_dir,
+        appdir: PathBuf::from(DEFAULT_APPDIR),
     })
 }
 
@@ -473,7 +478,7 @@ mod test_support {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(data);
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     pub fn create_cask_dmg(app_name: &str, binary_relative_path: &str, contents: &str) -> Vec<u8> {

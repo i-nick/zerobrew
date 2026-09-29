@@ -399,7 +399,7 @@ fn verify_cached_blob(path: &std::path::Path, expected_sha256: &str) -> Result<b
     let bytes = std::fs::read(path).map_err(Error::store("failed to read cached blob"))?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
-    let actual = format!("{:x}", hasher.finalize());
+    let actual = hex::encode(hasher.finalize());
     Ok(actual == expected_sha256.trim().to_lowercase())
 }
 
@@ -449,7 +449,7 @@ pub(crate) async fn download_response_internal(
         }
     }
 
-    let actual_hash = format!("{:x}", hasher.finalize());
+    let actual_hash = hex::encode(hasher.finalize());
 
     if actual_hash != expected_sha256 {
         return Err(Error::ChecksumMismatch {

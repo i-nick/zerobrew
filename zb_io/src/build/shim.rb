@@ -35,8 +35,11 @@ module OS
 
   module Mac
     def self.version
-      return MacOSVersion.new("15.0") if OS.mac?
-      MacOSVersion.new("0")
+      return MacOSVersion.new("0") unless OS.mac?
+      @version ||= begin
+        raw = `sw_vers -productVersion 2>/dev/null`.strip rescue ""
+        MacOSVersion.new(raw.empty? ? "15.0" : raw)
+      end
     end
   end
 end
@@ -44,18 +47,41 @@ end
 class MacOSVersion
   include Comparable
 
+  # Mirrors Homebrew's MacOSVersion::SYMBOLS so formulas can compare against
+  # codenames (e.g. `MacOS.version >= :sonoma`).
+  SYMBOLS = {
+    golden_gate: "27",
+    tahoe: "26",
+    sequoia: "15",
+    sonoma: "14",
+    ventura: "13",
+    monterey: "12",
+    big_sur: "11",
+    catalina: "10.15",
+    mojave: "10.14",
+  }.freeze
+
+  def self.from_symbol(symbol)
+    new(SYMBOLS.fetch(symbol))
+  end
+
   def initialize(version)
-    @version = version
-    @major = version.split(".").first.to_i
+    version = SYMBOLS.fetch(version) if version.is_a?(Symbol)
+    @version = version.to_s
+    @major = @version.split(".").first.to_i
   end
 
   def <=>(other)
-    other = MacOSVersion.new(other.to_s) unless other.is_a?(MacOSVersion)
-    @version <=> other.to_s
+    other = MacOSVersion.new(other) unless other.is_a?(MacOSVersion)
+    Gem::Version.new(@version) <=> Gem::Version.new(other.to_s)
+  rescue ArgumentError, KeyError
+    nil
   end
 
   def to_s; @version; end
   def to_i; @major; end
+  def major; @major; end
+  def to_sym; SYMBOLS.key(@version) || SYMBOLS.key(@major.to_s); end
 end
 
 module Hardware

@@ -2,8 +2,6 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use fs4::fs_std::FileExt;
-
 use crate::extraction::extract::extract_archive;
 use zb_core::Error;
 
@@ -67,7 +65,7 @@ impl Store {
             File::create(&lock_path).map_err(Error::store("failed to create lock file"))?;
 
         lock_file
-            .lock_exclusive()
+            .lock()
             .map_err(Error::store("failed to acquire lock"))?;
 
         // Double-check after acquiring lock (another process may have created it)
@@ -108,7 +106,7 @@ impl Store {
             File::create(&lock_path).map_err(Error::store("failed to create lock file"))?;
 
         lock_file
-            .lock_exclusive()
+            .lock()
             .map_err(Error::store("failed to acquire lock"))?;
 
         if entry_path.exists() {
