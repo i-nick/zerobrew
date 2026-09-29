@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated all dependencies to their latest releases (including `zip` 8, `zstd` 0.14, `rusqlite` 0.40, `sha2` 0.11); replaced `fs4` with std file locking
 - CI actions updated to their latest Node 24 releases; `cargo audit` runs directly instead of via `rustsec/audit-check`
 - Release workflow now runs fmt, clippy (`-D warnings`) and `cargo audit` before building
+- Removed the weekly Homebrew compatibility workflow
 
 ### Security
 - Bump `h2` and `rustls` to fix RUSTSEC-2026-0258 and RUSTSEC-2026-0285
