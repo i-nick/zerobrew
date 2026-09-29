@@ -1,10 +1,10 @@
-# Contributing to zerobrew
+# Contributing to brew
 
-Thanks for your interest in contributing to zerobrew! This document provides guidelines for contributing to the project.
+Thanks for your interest in contributing to brew! This document provides guidelines for contributing to the project.
 
 ## Licensing
 
-By contributing to zerobrew, you agree your contributions will be dual-licensed under either [Apache](./LICENSE-APACHE.md) OR [MIT](./LICENSE-MIT.md), at the licensee's choice.
+By contributing to brew, you agree your contributions will be dual-licensed under either [Apache](./LICENSE-APACHE.md) OR [MIT](./LICENSE-MIT.md), at the licensee's choice.
 
 ## Soft Prerequisites
 
@@ -17,7 +17,7 @@ cannot accept or tolerate PRs with no clear guidance or thought put into them.
 
 **_Please understand_** that we reserve the right to simply close your PR if it exhibits clear indicators 
 of heavy LLM usage. We understand you are excited to contribute but the code must reach a level of quality
-that's typically achieved through thoughtful engagement in the community and the issues/agenda of zerobrew- NOT
+that's typically achieved through thoughtful engagement in the community and the issues/agenda of brew- NOT
 by throwing a prompt into an LLM and opening a PR with no direction.
 
 If you ever need help or want to walk through an issue or idea that you have with one of the maintainers, feel free to join 
@@ -25,11 +25,11 @@ the [community discord](https://discord.gg/TVatsQBFJt); we would be more than ha
 
 ## Project Structure
 
-zerobrew is organized as a Cargo workspace with three crates:
+brew is organized as a Cargo workspace with three crates:
 
-- `zb_core`: Core data models and domain logic (formula resolution, bottle selection)
-- `zb_io`: I/O operations (API client, downloads, extraction, installation)
-- `zb_cli`: Command-line interface
+- `brew_core`: Core data models and domain logic (formula resolution, bottle selection)
+- `brew_io`: I/O operations (API client, downloads, extraction, installation)
+- `brew_cli`: Command-line interface
 
 Any changes you make that touch several crates should be organized properly. See [commit hygiene](#commit-hygiene)
 
@@ -55,8 +55,8 @@ out in the Discord to give us a heads up or open an issue first to discuss your 
 This project includes a `Justfile`, Install [just](https://github.com/casey/just) and use these commands instead of `cargo` (for ease of development):
 
 - `just build` Check formatting, lint, then build the binary (Builds debug binary)
-- `just install` Build and install zb and zbx to `$HOME/.local/bin`
-- `just uninstall` Remove all zerobrew installations and configurations
+- `just install` Build and install b and bx to `$HOME/.local/bin`
+- `just uninstall` Remove all brew installations and configurations
 - `just fmt` Format code with rustfmt
 - `just fmt-check` Check code formatting
 - `just lint` Run clippy with strict warnings
@@ -76,7 +76,7 @@ We ask that you follow the format below for commits:
 
 for instance:
 ```bash
-fix(zb_cli): foo bar moo baz
+fix(brew_cli): foo bar moo baz
 ```
 Allowed prefixes:
 ```bash
@@ -101,41 +101,6 @@ are contained and cleanly seperated, properly describing/notating which commits 
 - Use `tempfile` for filesystem tests
 - Use `wiremock` for HTTP mocking in integration tests
 - Tests should be deterministic and not rely on external network access
-
-## Running Benchmarks
-
-To benchmark performance:
-
-```bash
-just bench --full
-```
-
-This runs a 100-package installation suite comparing zerobrew to Homebrew. This is especially crucial to run if you are 
-planning on contributing to performance/optimization related changes.
-
-Useful options:
-
-```bash
-just bench --quick
-just bench --dry-run
-just bench --full results/
-just bench --format csv --output benchmark.csv
-just bench --log bench.log
-```
-
-Notes:
-- Defaults to the quick package list (22 packages); use `--full` for all 100.
-- `--full [dir]` writes all formats (txt/json/csv/html) to the directory.
-- `--output` infers format from file extension when `--format` is omitted.
-- Output includes cold + warm cache speedups per package.
-
-### macOS Homebrew permissions
-
-On macOS, Homebrew should be installed with a user-writable prefix. If `just bench` fails with a permission error, fix it by running:
-
-```bash
-sudo chown -R "$(whoami)" "$(brew --prefix)"
-```
 
 ## Questions?
 

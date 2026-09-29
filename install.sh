@@ -47,8 +47,8 @@ error_exit() {
 BUILD_OUTPUT=""
 DOWNLOAD_TEMP_DIR=""
 SOURCE_TEMP_DIR=""
-DOWNLOADED_ZB_PATH=""
-DOWNLOADED_ZBX_PATH=""
+DOWNLOADED_B_PATH=""
+DOWNLOADED_BX_PATH=""
 cleanup() {
     printf '\033[?25h'  # Restore cursor
     [[ -n "$BUILD_OUTPUT" && -f "$BUILD_OUTPUT" ]] && rm -f "$BUILD_OUTPUT"
@@ -58,38 +58,38 @@ cleanup() {
 }
 trap cleanup EXIT
 
-ZEROBREW_REPO="https://github.com/i-nick/zerobrew.git"
-ZEROBREW_BIN="$HOME/.local/bin"
-ZSHRC_BLOCK_START="# >>> zerobrew installer >>>"
-ZSHRC_BLOCK_END="# <<< zerobrew installer <<<"
+BREW_REPO="https://github.com/i-nick/zerobrew.git"
+BREW_BIN="$HOME/.local/bin"
+ZSHRC_BLOCK_START="# >>> brew installer >>>"
+ZSHRC_BLOCK_END="# <<< brew installer <<<"
 
-# zerobrew only supports macOS on Apple Silicon.
+# brew only supports macOS on Apple Silicon.
 if [[ "$(uname -s)" != "Darwin" ]]; then
-    error_exit "zerobrew only supports macOS on Apple Silicon. Detected OS: $(uname -s)"
+    error_exit "brew only supports macOS on Apple Silicon. Detected OS: $(uname -s)"
 fi
 case "$(uname -m)" in
 arm64 | aarch64) ;;
 *)
-    error_exit "zerobrew only supports Apple Silicon (arm64) Macs. Detected architecture: $(uname -m)"
+    error_exit "brew only supports Apple Silicon (arm64) Macs. Detected architecture: $(uname -m)"
     ;;
 esac
 
-ZEROBREW_ROOT="/opt/zerobrew"
-: "${ZEROBREW_PREFIX:=$ZEROBREW_ROOT}"
+BREW_ROOT="/opt/brew"
+: "${BREW_PREFIX:=$BREW_ROOT}"
 
-export ZEROBREW_ROOT
-export ZEROBREW_PREFIX
+export BREW_ROOT
+export BREW_PREFIX
 
-# Ensure system tools are used instead of zerobrew-installed ones.
-# A prior `zb init` adds $ZEROBREW_PREFIX/bin to PATH, which can cause
-# zerobrew's curl/git (linked against zerobrew's OpenSSL) to be used by
+# Ensure system tools are used instead of brew-installed ones.
+# A prior `b init` adds $BREW_PREFIX/bin to PATH, which can cause
+# brew's curl/git (linked against brew's OpenSSL) to be used by
 # this script. On some macOS versions that leads to dyld symbol errors.
 # see https://github.com/i-nick/zerobrew/issues/288
 sanitized_path=""
 IFS=':' read -ra _path_parts <<< "$PATH"
 for _p in "${_path_parts[@]}"; do
     case "$_p" in
-        "$ZEROBREW_PREFIX"/bin|"$ZEROBREW_ROOT"/bin) ;;
+        "$BREW_PREFIX"/bin|"$BREW_ROOT"/bin) ;;
         *) sanitized_path="${sanitized_path:+$sanitized_path:}$_p" ;;
     esac
 done
@@ -105,19 +105,19 @@ no_modify_path=false
 binary_paths=()
 
 usage() {
-    printf "zero%bbrew%b Installer\n" "$ORANGE" "$NC"
+    printf "%bbrew%b Installer\n" "$ORANGE" "$NC"
     printf "\n"
     printf "Usage: install.sh %b[options]%b\n" "$MUTED" "$NC"
     printf "\n"
     printf "Options:\n"
     printf "    -h, --help               %bDisplay this help message%b\n" "$MUTED" "$NC"
-    printf "    -b, --binary <path>...   %bInstalls binaries (zb, zbx) to ~/.local/bin%b\n" "$MUTED" "$NC"
+    printf "    -b, --binary <path>...   %bInstalls binaries (b, bx) to ~/.local/bin%b\n" "$MUTED" "$NC"
     printf "        --no-modify-path     %bDon't modify shell config files (.zshrc, .bashrc, etc.)%b\n" "$MUTED" "$NC"
     printf "\n"
     printf "Examples:%b\n" "$MUTED"
     printf "    ./install.sh --no-modify-path\n"
-    printf "    ./install.sh -b /path/to/zb\n"
-    printf "    ./install.sh -b /path/to/zb /path/to/zbx%b\n" "$NC"
+    printf "    ./install.sh -b /path/to/b\n"
+    printf "    ./install.sh -b /path/to/b /path/to/bx%b\n" "$NC"
 }
 
 spinner() {
@@ -191,7 +191,7 @@ install_bin() {
 
 # Ensure $HOME/.local/bin is on PATH for future zsh sessions.
 #
-# `zb init` also adds this directory to PATH, but it writes to .zshenv when
+# `b init` also adds this directory to PATH, but it writes to .zshenv when
 # that file exists, so .zshrc can be left without the entry. This adds a
 # self-contained, idempotent block to .zshrc as well. The guard means PATH
 # never gains a duplicate entry when both blocks run.
@@ -202,7 +202,7 @@ add_local_bin_to_zshrc() {
         return 0
     fi
 
-    # Only touch .zshrc for zsh users; other shells are handled by `zb init`.
+    # Only touch .zshrc for zsh users; other shells are handled by `b init`.
     if [[ "${SHELL:-}" != *zsh* ]]; then
         return 0
     fi
@@ -237,8 +237,8 @@ add_local_bin_to_zshrc() {
     completed "Added ${ORANGE}~/.local/bin${NC} to PATH in $zshrc"
 }
 
-zb_init() {
-    local zb_path="$1"
+b_init() {
+    local b_path="$1"
     local no_modify="$2"
     local init_args=()
 
@@ -246,23 +246,29 @@ zb_init() {
         init_args+=("--no-modify-path")
     fi
 
-    "$zb_path" init ${init_args[@]+"${init_args[@]}"} >/dev/null 2>&1 || error_exit "Failed to initialize zerobrew"
+    "$b_path" init ${init_args[@]+"${init_args[@]}"} >/dev/null 2>&1 || error_exit "Failed to initialize brew"
 }
 
 finalize_installation() {
     local no_modify="$1"
 
     # Verify the binary works
-    if ! "$ZEROBREW_BIN/zb" --version >/dev/null 2>&1; then
+    if ! "$BREW_BIN/b" --version >/dev/null 2>&1; then
         error_exit "Installation succeeded but binary does not execute properly"
     fi
 
-    # Add zb to PATH for current session if not already present
-    if [[ ":$PATH:" != *":$ZEROBREW_BIN:"* ]]; then
-        export PATH="$ZEROBREW_BIN:$PATH"
+    # `brew` is an alias for `b`.
+    if ! ln -sfn b "$BREW_BIN/brew"; then
+        error_exit "Failed to create brew alias in $BREW_BIN"
+    fi
+    completed "Linked ${ORANGE}brew${NC} -> b in $BREW_BIN"
+
+    # Add b to PATH for current session if not already present
+    if [[ ":$PATH:" != *":$BREW_BIN:"* ]]; then
+        export PATH="$BREW_BIN:$PATH"
     fi
 
-    zb_init "$ZEROBREW_BIN/zb" "$no_modify"
+    b_init "$BREW_BIN/b" "$no_modify"
     add_local_bin_to_zshrc "$no_modify"
 
     print_logo
@@ -303,10 +309,10 @@ download_release_binary() {
         return 0
     fi
 
-    if [[ "$output_name" == "zb" ]]; then
-        DOWNLOADED_ZB_PATH="$downloaded_path"
-    elif [[ "$output_name" == "zbx" ]]; then
-        DOWNLOADED_ZBX_PATH="$downloaded_path"
+    if [[ "$output_name" == "b" ]]; then
+        DOWNLOADED_B_PATH="$downloaded_path"
+    elif [[ "$output_name" == "bx" ]]; then
+        DOWNLOADED_BX_PATH="$downloaded_path"
     fi
 
     completed "Downloaded ${ORANGE}${asset_name}${NC} from GitHub Releases"
@@ -314,46 +320,46 @@ download_release_binary() {
 }
 
 try_release_install() {
-    local zb_asset zbx_asset
+    local b_asset bx_asset
 
     DOWNLOAD_TEMP_DIR=$(mktemp -d)
-    DOWNLOADED_ZB_PATH=""
-    DOWNLOADED_ZBX_PATH=""
+    DOWNLOADED_B_PATH=""
+    DOWNLOADED_BX_PATH=""
 
-    if ! zb_asset=$(resolve_release_asset "zb"); then
-        warn "No prebuilt release binary for zb on $(uname -s)/$(uname -m). Falling back to source build."
+    if ! b_asset=$(resolve_release_asset "b"); then
+        warn "No prebuilt release binary for b on $(uname -s)/$(uname -m). Falling back to source build."
         return 1
     fi
 
-    if ! download_release_binary "$zb_asset" "zb" "true"; then
-        warn "Release binary download failed for ${zb_asset}. Falling back to source build."
+    if ! download_release_binary "$b_asset" "b" "true"; then
+        warn "Release binary download failed for ${b_asset}. Falling back to source build."
         return 1
     fi
 
-    if zbx_asset=$(resolve_release_asset "zbx"); then
-        download_release_binary "$zbx_asset" "zbx" "false"
+    if bx_asset=$(resolve_release_asset "bx"); then
+        download_release_binary "$bx_asset" "bx" "false"
     fi
 
-    local binaries_to_install=("$DOWNLOADED_ZB_PATH")
-    if [[ -n "$DOWNLOADED_ZBX_PATH" && -f "$DOWNLOADED_ZBX_PATH" ]]; then
-        binaries_to_install+=("$DOWNLOADED_ZBX_PATH")
+    local binaries_to_install=("$DOWNLOADED_B_PATH")
+    if [[ -n "$DOWNLOADED_BX_PATH" && -f "$DOWNLOADED_BX_PATH" ]]; then
+        binaries_to_install+=("$DOWNLOADED_BX_PATH")
     fi
 
-    install_bin "$ZEROBREW_BIN" "${binaries_to_install[@]}"
+    install_bin "$BREW_BIN" "${binaries_to_install[@]}"
     finalize_installation "$no_modify_path"
     return 0
 }
 
 print_logo() {
     printf "\n"
-    printf "%b▄▄▄▄▄ ▄▄▄▄▄ ▄▄▄▄   ▄▄▄ %b ▄▄▄▄  ▄▄▄▄  ▄▄▄▄▄ ▄▄   ▄▄\n" "$NC" "$ORANGE"
-    printf "%b  ▄█▀ ██▄▄  ██▄█▄ ██▀██%b ██▄██ ██▄█▄ ██▄▄  ██ ▄ ██\n" "$NC" "$ORANGE"
-    printf "%b▄██▄▄ ██▄▄▄ ██ ██ ▀███▀%b ██▄█▀ ██ ██ ██▄▄▄  ▀█▀█▀ \n" "$NC" "$ORANGE"
+    printf "%b▄▄▄▄  ▄▄▄▄  ▄▄▄▄▄ ▄▄   ▄▄%b\n" "$ORANGE" "$NC"
+    printf "%b██▄██ ██▄█▄ ██▄▄  ██ ▄ ██%b\n" "$ORANGE" "$NC"
+    printf "%b██▄█▀ ██ ██ ██▄▄▄  ▀█▀█▀ %b\n" "$ORANGE" "$NC"
     printf "\n"
 
-    printf "%bStart installing %bPackages%b with %bzerobrew%b:\n\n" "$MUTED" "$NC" "$MUTED" "$ORANGE" "$NC"
-    printf "  zb install %bffmpeg%b    # Install a Package%b\n" "$ORANGE" "$MUTED" "$NC"
-    printf "  zbx %byetris%b           # Single-time Run%b\n\n" "$ORANGE" "$MUTED" "$NC"
+    printf "%bStart installing %bPackages%b with %bbrew%b:\n\n" "$MUTED" "$NC" "$MUTED" "$ORANGE" "$NC"
+    printf "  b install %bffmpeg%b    # Install a Package%b\n" "$ORANGE" "$MUTED" "$NC"
+    printf "  bx %byetris%b           # Single-time Run%b\n\n" "$ORANGE" "$MUTED" "$NC"
     printf "%bFor more information visit %bhttps://zerobrew.rs/docs\n\n" "$MUTED" "$NC"
 }
 
@@ -387,14 +393,14 @@ done
 
 # Skip all if binary path is provided
 if [[ ${#binary_paths[@]} -gt 0 ]]; then
-    install_bin "$ZEROBREW_BIN" "${binary_paths[@]}"
+    install_bin "$BREW_BIN" "${binary_paths[@]}"
     finalize_installation "$no_modify_path"
     exit 0
 fi
 
 # Check for required commands
-check_command "curl" "Install curl using your package manager (e.g., 'brew install curl' on macOS)"
-check_command "git" "Install git using your package manager (e.g., 'brew install git' on macOS)"
+check_command "curl" "Install curl and try again"
+check_command "git" "Install the Xcode Command Line Tools with 'xcode-select --install'"
 check_command "mkdir" "Your system should have mkdir installed by default"
 check_command "cp" "Your system should have cp installed by default"
 check_command "chmod" "Your system should have chmod installed by default"
@@ -426,37 +432,34 @@ fi
 # Clone source into a temporary checkout when prebuilt binaries are unavailable.
 SOURCE_TEMP_DIR=$(mktemp -d)
 (
-    if ! git clone --depth 1 "$ZEROBREW_REPO" "$SOURCE_TEMP_DIR" >/dev/null 2>&1; then
+    if ! git clone --depth 1 "$BREW_REPO" "$SOURCE_TEMP_DIR" >/dev/null 2>&1; then
         printf "Failed to clone repository\n" >&2
         exit 1
     fi
 ) &
-if ! spinner "Cloning ${ORANGE}zerobrew${NC} repository" $!; then
-    error_exit "Failed to clone zerobrew repository. Check your network connection and that the repository exists."
+if ! spinner "Cloning ${ORANGE}brew${NC} repository" $!; then
+    error_exit "Failed to clone brew repository. Check your network connection and that the repository exists."
 fi
-completed "Cloned ${ORANGE}zerobrew${NC} repository"
+completed "Cloned ${ORANGE}brew${NC} repository"
 cd "$SOURCE_TEMP_DIR" || error_exit "Failed to enter directory: $SOURCE_TEMP_DIR"
 
 # Build
-if [[ -d "$ZEROBREW_PREFIX/lib/pkgconfig" ]]; then
-    export PKG_CONFIG_PATH="$ZEROBREW_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-fi
-if [[ -d "/opt/homebrew/lib/pkgconfig" ]] && [[ ! "${PKG_CONFIG_PATH:-}" =~ "/opt/homebrew/lib/pkgconfig" ]]; then
-    export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+if [[ -d "$BREW_PREFIX/lib/pkgconfig" ]]; then
+    export PKG_CONFIG_PATH="$BREW_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 fi
 
 # Use a temp file to capture cargo's JSON output for binary path detection
 BUILD_OUTPUT=$(mktemp)
 
 (
-    if ! cargo build --release --bin zb --bin zbx --message-format=json > "$BUILD_OUTPUT" 2>&1; then
+    if ! cargo build --release --bin b --bin bx --message-format=json > "$BUILD_OUTPUT" 2>&1; then
         exit 1
     fi
 ) &
-if ! spinner "Building ${ORANGE}zerobrew${NC}" $!; then
-    error_exit "Failed to build zerobrew. Run 'cargo build --release --bin zb --bin zbx' to see details."
+if ! spinner "Building ${ORANGE}brew${NC}" $!; then
+    error_exit "Failed to build brew. Run 'cargo build --release --bin b --bin bx' to see details."
 fi
-completed "Built ${ORANGE}zerobrew${NC}"
+completed "Built ${ORANGE}brew${NC}"
 
 # Parse cargo's JSON output to find the actual binary paths
 # This handles custom CARGO_TARGET_DIR, .cargo/config.toml target-dir, etc.
@@ -476,16 +479,16 @@ parse_binary_path() {
     echo "$path"
 }
 
-ZB_PATH=$(parse_binary_path "zb")
-ZBX_PATH=$(parse_binary_path "zbx")
+B_PATH=$(parse_binary_path "b")
+BX_PATH=$(parse_binary_path "bx")
 
-if [[ -z "$ZB_PATH" || ! -f "$ZB_PATH" ]]; then
-    error_exit "Build succeeded but could not locate zb binary. Check cargo configuration."
+if [[ -z "$B_PATH" || ! -f "$B_PATH" ]]; then
+    error_exit "Build succeeded but could not locate b binary. Check cargo configuration."
 fi
 
-if [[ -z "$ZBX_PATH" || ! -f "$ZBX_PATH" ]]; then
-    error_exit "Build succeeded but could not locate zbx binary. Check cargo configuration."
+if [[ -z "$BX_PATH" || ! -f "$BX_PATH" ]]; then
+    error_exit "Build succeeded but could not locate bx binary. Check cargo configuration."
 fi
 
-install_bin "$ZEROBREW_BIN" "$ZB_PATH" "$ZBX_PATH"
+install_bin "$BREW_BIN" "$B_PATH" "$BX_PATH"
 finalize_installation "$no_modify_path"

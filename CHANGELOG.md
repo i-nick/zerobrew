@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- **Renamed the project from zerobrew to brew.** The CLI is now `b` (with `brew` installed as an alias) and `zbx` is now `bx`. The default root is `/opt/brew`, environment variables use the `BREW_` prefix (`BREW_ROOT`, `BREW_PREFIX`, `BREW_AUTO_INIT`), and crates are `brew_core`, `brew_io` and `brew_cli`. Existing `/opt/zerobrew` installs are not migrated.
+- CI is a single `check` job (fmt, clippy, tests, audit) on pull requests; every merge to `main` runs it again and publishes a release, auto-incrementing the patch version.
+
+### Removed
+- `migrate` command and all Homebrew-specific features: Homebrew install suggestions, the Homebrew tap install option, and the Homebrew benchmark suite and site panel.
+
 ### Added
 - Chinese translation of the README ([#315](https://github.com/i-nick/zerobrew/pull/316))
 - Regex matches on `/Cellar/<pkg>/)([^/]+)(/)`, so it only matches version segments within Cellar-style paths ([#317](https://github.com/i-nick/zerobrew/pull/317))
